@@ -24,6 +24,7 @@
 - Parked live viewing works only while the head unit is already powered and expires after 30 minutes unless renewed.
 - Parked recording is off by default and, when enabled, records only authenticated parked live sessions. It is not sentry mode.
 - Keep source geometry, QCarCam input, root paths, protocol limits, authentication, and signature permissions fixed; expose only safe presets and feature toggles.
+- Render optional telemetry once in the EGL path before encoding. Each displayed value has its own setting. Never label pedal braking without a confirmed vehicle signal.
 - Keep camera faults isolated from Haval EcoTrip telemetry, trips, controls, and updates.
 - Haval Camera remains AGPL-3.0 and must ship source/notices; preserve the Shizuku MIT notice and add third-party notices for new dependencies.
 - Never run Android, Gradle, Kotlin, or Xcode builds on the coordinator. Use an audited Git commit on the authorized Mac Mini; do not fall back locally.
@@ -48,6 +49,8 @@
 - `app/src/main/java/br/com/redesurftank/havalcamera/CommandJournal.java`: persisted command revision and replay decisions.
 - `app/src/main/java/br/com/redesurftank/havalcamera/H264WireCodec.java`: live-message framing and AVC payload validation.
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettings.java`: validated persisted settings, revision, snapshots, and atomic patches.
+- `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayModel.java`: freshness, filtered acceleration, state classification, and field visibility.
+- `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayRenderer.java`: one-pass EGL text/graphics overlay used by preview and encoder.
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoCatalog.java`: trip/segment metadata and atomic index writes.
 - `app/src/main/java/br/com/redesurftank/havalcamera/RetentionPlanner.java`: pure oldest-trip deletion selection.
 - `app/src/main/java/br/com/redesurftank/havalcamera/SegmentMuxer.java`: 60-second `.partial` to MP4 lifecycle.
@@ -168,7 +171,7 @@ Assert duplicate request IDs are ignored, lower revisions are ignored after rest
 
 - [ ] **Step 2: Implement `VideoContract` and `CommandJournal`**
 
-Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence. Include `GET_SETTINGS`, revision-checked `UPDATE_SETTINGS`, and confirmed `DELETE_COMPLETED` contracts.
+Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence. Include freshness-checked, non-journaled `TELEMETRY_SAMPLE`, `GET_SETTINGS`, revision-checked `UPDATE_SETTINGS`, and confirmed `DELETE_COMPLETED` contracts.
 
 - [ ] **Step 3: Write failing framing tests**
 
@@ -250,7 +253,10 @@ git commit -m "feat: add crash-safe trip video storage"
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/EglFrameEncoder.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/SegmentMuxer.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/RecordingCoordinator.java`
+- Create: `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayModel.java`
+- Create: `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayRenderer.java`
 - Create: `app/src/test/java/br/com/redesurftank/havalcamera/RecordingCoordinatorTest.java`
+- Create: `app/src/test/java/br/com/redesurftank/havalcamera/TelemetryOverlayModelTest.java`
 - Modify: `app/src/main/java/br/com/redesurftank/havalcamera/CameraService.java`
 - Modify: `app/src/main/java/br/com/redesurftank/havalcamera/CameraPreview.java`
 
@@ -270,25 +276,29 @@ Implement `CameraCaptureClient.start(FrameConsumer)` and `stop()` using the exis
 
 Select only a hardware AVC encoder supporting `COLOR_FormatSurface`; configure one validated quality preset; upload BGR once; correct channels in shader; set presentation timestamps; drain codec on its own thread; expose SPS/PPS and request-sync-frame.
 
-- [ ] **Step 4: Implement `SegmentMuxer`**
+- [ ] **Step 4: Implement and test the telemetry overlay**
+
+Test speed-to-acceleration filtering, stale/future samples, bounds, acceleration/constant/deceleration/regen classification, every independent field switch, master switch, four positions, and the rule that no state renders as pedal braking. Render the selected immutable snapshot in the existing EGL pass before both preview and encoder output; do not allocate per frame.
+
+- [ ] **Step 5: Implement `SegmentMuxer`**
 
 Open `current.partial`, add the AVC track only after output format is known, begin each segment at a keyframe, stop/close before atomic rename, compute SHA-256 off the codec thread, and update `VideoCatalog`.
 
-- [ ] **Step 5: Preserve root security checks**
+- [ ] **Step 6: Preserve root security checks**
 
 Adapt only the canonical package paths required by the final APK. Keep private copy, mode `0700`, positional shell parameters, exact redirection, stderr logging, pipe validation, and parent-death checks unchanged.
 
-- [ ] **Step 6: Verify host tests and Android build**
+- [ ] **Step 7: Verify host tests and Android build**
 
 Run on Mac Mini: `./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug`
 
 Expected: coordinator tests pass and APK builds. Do not claim camera compatibility yet.
 
-- [ ] **Step 7: Perform Gate 1 on parked hardware**
+- [ ] **Step 8: Perform Gate 1 on parked hardware**
 
-Install the debug APK on the explicitly selected authorized head unit. Record 10 minutes in P using Standard. Verify hardware codec name, 15 fps target, six or more playable segments, colors, monotonic timestamps, hashes, no `/data/vendor/camera` dumps, no orphan child, CPU/memory/temperature evidence, and successful reopen. Then smoke-test Economy and High without claiming them supported if hardware configuration fails.
+Install the debug APK on the explicitly selected authorized head unit. Record 10 minutes in P using Standard. Verify hardware codec name, 15 fps target, six or more playable segments, colors, monotonic timestamps, overlay equality between preview/MP4/live, stale-value hiding, hashes, no `/data/vendor/camera` dumps, no orphan child, CPU/memory/temperature evidence, and successful reopen. Then smoke-test Economy and High without claiming them supported if hardware configuration fails.
 
-- [ ] **Step 8: Commit evidence and code**
+- [ ] **Step 9: Commit evidence and code**
 
 ```bash
 git add app/src/main app/src/test docs/VALIDATION.md
@@ -332,7 +342,7 @@ Provider exports metadata and content URIs read-only under a separate signature 
 
 - [ ] **Step 5: Implement safe settings**
 
-Persist automatic trip recording, parked-live recording, remote live, remote downloads, quality preset, 5/10/20 GB reserve, and automatic deletion in private SharedPreferences. Add a settings activity reachable from CameraActivity. Use presets only. Require confirmation before deleting completed recordings; never delete active or transferring trips. Apply quality on the next encoder start, storage before the next segment, and feature toggles immediately.
+Persist automatic trip recording, parked-live recording, remote live, remote downloads, quality preset, 5/10/20 GB reserve, automatic deletion, overlay master, individual date/time, speed, acceleration, drive-state, deceleration/regen switches, and four-corner position in private SharedPreferences. Add a settings activity reachable from CameraActivity. Use presets only. Require confirmation before deleting completed recordings; never delete active or transferring trips. Apply quality on the next encoder start, storage before the next segment, and feature toggles immediately.
 
 - [ ] **Step 6: Verify**
 
@@ -356,8 +366,10 @@ git commit -m "feat: add camera recording service and settings"
 **Files:**
 - Create: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/TripVideoBridge.kt`
 - Create: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/CameraSettingsReader.kt`
+- Create: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/CameraTelemetryPublisher.kt`
 - Create: `/root/projects/haval-ecotrip/app/src/test/java/br/com/redesurftank/ecotrip/managers/TripVideoBridgeTest.kt`
 - Create: `/root/projects/haval-ecotrip/app/src/test/java/br/com/redesurftank/ecotrip/managers/CameraSettingsReaderTest.kt`
+- Create: `/root/projects/haval-ecotrip/app/src/test/java/br/com/redesurftank/ecotrip/managers/CameraTelemetryPublisherTest.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/TripManager.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/services/CarTelemetryService.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/MqttManager.kt`
@@ -395,13 +407,17 @@ Request camera control/read signature permissions. Register an explicit signatur
 
 Model `CameraSettingsReader` on `ConnectivityStatusReader`: query the full Haval Camera snapshot, publish retained state, use provider `call()` for updates, copy the complete typed response, and re-query after every command. Validate allowed keys and values before IPC. Return stale-revision conflicts with the confirmed snapshot. Never calculate camera settings independently in EcoTrip.
 
-- [ ] **Step 8: Verify on Mac Mini**
+- [ ] **Step 8: Publish bounded overlay telemetry**
+
+Send confirmed CAN speed and electric-motor power to Haval Camera at 5 Hz only while camera recording/live is active. Include monotonic/wall timestamps and validity. Do not send GPS coordinates or formatted text. Test rate limiting, stale source rejection, package absence, and that telemetry failures never affect trip recording or vehicle telemetry.
+
+- [ ] **Step 9: Verify on Mac Mini**
 
 Run the focused unit test task for `TripVideoBridgeTest`, then the repository's authorized Android debug build.
 
 Expected: tests and build pass; installing without Haval Camera leaves telemetry healthy and logs one bounded availability error.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add app/src/main app/src/test
@@ -724,7 +740,7 @@ Measure glass-to-glass latency, bitrate, dropped frames, queue memory, reconnect
 
 - [ ] **Step 5: Run controlled route gate**
 
-After parked gates pass, record a short controlled route, then at least 60 minutes. Verify automatic start/stop, geofence close-and-open, gallery in both apps, live while moving/parked, completed-trip-only retrieval, temperature, and OEM AVM.
+After parked gates pass, record a short controlled route, then at least 60 minutes. Verify automatic start/stop, geofence close-and-open, gallery in both apps, live while moving/parked, completed-trip-only retrieval, every overlay field toggle and position, timestamp/speed accuracy, acceleration plausibility, honest deceleration/regen labels, temperature, and OEM AVM.
 
 - [ ] **Step 6: Record rollout and rollback**
 

@@ -29,6 +29,7 @@ The camera recorder remains a separate Android application. Haval EcoTrip suppli
 - Allow resumable retrieval of recordings while the car is online.
 - Allow on-demand live viewing while parked when the head unit is already powered.
 - Let the owner control safe recording, retention, live-view, and transfer settings inside Haval Camera.
+- Burn an optional telemetry overlay into both recorded and live frames, with independent controls for every displayed value.
 - Preserve strict root-path validation and never create raw camera dumps.
 
 ## Non-goals
@@ -42,6 +43,7 @@ The camera recorder remains a separate Android application. Haval EcoTrip suppli
 - No public camera endpoint, unauthenticated share link, or arbitrary third-party consumer.
 - No collision detection, sentry mode, or automatic incident preservation in this delivery.
 - No seamless multi-camera mosaic beyond the composition supplied by input 4.
+- No claim that the physical brake pedal is pressed until a confirmed vehicle signal exists. Deceleration and regenerative braking remain explicitly labeled as derived states.
 
 ## Approaches considered
 
@@ -86,6 +88,7 @@ Haval EcoTrip remains the control-plane owner. It:
 - supplies short-lived, scope-limited bridge session credentials to Haval Camera;
 - reports camera availability and transfer progress as diagnostics;
 - mirrors the Haval Camera settings snapshot and forwards validated setting changes using the same command-then-reconcile pattern as Impulse 4G controls;
+- sends a bounded, signature-protected telemetry sample containing CAN speed and electric-motor power for the optional video overlay;
 - continues normally when Haval Camera is absent, stopped, full, or failing.
 
 Haval EcoTrip never reads raw frames and never stores the bridge master credential in Haval Camera.
@@ -127,8 +130,27 @@ Haval Camera exposes a local settings screen and remains the only settings sourc
 - Minimum free space: 5 GB by default, with 10 GB and 20 GB choices.
 - Automatic deletion: on by default. When disabled, no completed trip is deleted automatically; recording stops visibly before violating the selected free-space reserve.
 - Delete recordings: deletes completed local trips only after explicit confirmation. Active and transferring trips remain protected.
+- Telemetry overlay: on by default. Date/time, speed, longitudinal acceleration, drive state, and deceleration/regen each have an independent switch. Position is one of four corners; bottom-left is the default.
 
 Quality changes apply to the next recording or live-only encoder start. Storage settings apply before the next segment opens. Feature toggles apply immediately through the service reducer. Fixed source resolution, QCarCam input, root paths, protocol limits, authentication, and signature permissions are not user-configurable.
+
+## Telemetry overlay
+
+Haval EcoTrip samples confirmed CAN vehicle speed and electric-motor power at no more than 10 Hz and sends them over signature-protected local IPC. Samples carry monotonic and wall-clock timestamps plus source-validity flags. Haval Camera rejects malformed, future, or more-than-two-second-old samples and never accepts caller-supplied display text.
+
+Haval Camera derives longitudinal acceleration from timestamped speed changes using a bounded low-pass filter. It classifies the state as accelerating, constant, decelerating, or regenerative braking. Regeneration requires negative motor power plus deceleration. Without a confirmed brake-pedal signal, it must display `DESACEL.` or `REGEN`, never `FREIO` or `PEDAL`.
+
+The overlay may contain:
+
+- local date and time;
+- CAN speed in km/h;
+- derived longitudinal acceleration in m/s²;
+- accelerating/constant state;
+- deceleration/regeneration state.
+
+Every field obeys its own setting plus a master overlay switch. Stale telemetry hides dynamic values instead of freezing them; date/time may continue. No GPS coordinates, trip names, credentials, or identifiers are drawn.
+
+The EGL compositor renders the selected overlay once, after camera color correction and before the hardware AVC input surface. Therefore local preview, MP4 segments, and live H.264 contain the same pixels. Overlay rendering must not create a second frame copy, block the encoder, or fall back to raw-frame storage.
 
 ## Android component design
 
@@ -198,6 +220,7 @@ All cross-app commands are explicit and protected by a custom signature permissi
 - `STOP_LIVE(sessionId)`: detach relay and stop live-only capture when no viewer remains.
 - `TRANSFER(requestId, tripId, segmentIds, viewerSession)`: send completed files from requested offsets.
 - `CANCEL_TRANSFER(requestId)`: stop file reads and network transfer.
+- `TELEMETRY_SAMPLE(monotonicMs, wallClockMs, speedKmh, motorPowerKw, validity)`: update the latest overlay inputs. This high-rate ephemeral sample is freshness-checked but not entered in the replay journal.
 - `GET_SETTINGS(requestId)`: return the current settings snapshot and settings revision.
 - `UPDATE_SETTINGS(requestId, expectedRevision, patch)`: validate and atomically apply a bounded settings patch, then return the full confirmed snapshot.
 - `DELETE_COMPLETED(requestId)`: after an explicit owner confirmation upstream, delete completed local recordings while preserving active and transferring trips.
