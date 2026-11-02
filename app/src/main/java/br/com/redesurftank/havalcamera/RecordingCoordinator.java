@@ -1,6 +1,7 @@
 package br.com.redesurftank.havalcamera;
 
 import java.util.Objects;
+import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -11,6 +12,10 @@ public final class RecordingCoordinator implements AutoCloseable {
         void write(EncodedAccessUnit unit) throws Exception;
 
         @Override default void close() throws Exception { }
+    }
+
+    public interface CodecSink extends Sink {
+        void onCodecConfig(byte[] sps, byte[] pps) throws Exception;
     }
 
     public interface Capture {
@@ -36,6 +41,8 @@ public final class RecordingCoordinator implements AutoCloseable {
                 return thread;
             });
     private volatile Sink live;
+    private byte[] latestSps;
+    private byte[] latestPps;
     private volatile boolean running = true;
 
     public RecordingCoordinator(
@@ -66,9 +73,38 @@ public final class RecordingCoordinator implements AutoCloseable {
 
     public synchronized void attachLiveSink(Sink sink) {
         Objects.requireNonNull(sink, "sink");
-        closeLive(live);
+        if (live != sink) closeLive(live);
         live = sink;
+        if (sink instanceof CodecSink && latestSps != null && latestPps != null) {
+            try { ((CodecSink) sink).onCodecConfig(latestSps, latestPps); }
+            catch (Exception failure) {
+                live = null;
+                closeLive(sink);
+                failures.onFailure(failure);
+                return;
+            }
+        }
         encoder.requestKeyFrame();
+    }
+
+    public synchronized void onCodecConfig(byte[] sps, byte[] pps) {
+        latestSps = Arrays.copyOf(Objects.requireNonNull(sps, "sps"), sps.length);
+        latestPps = Arrays.copyOf(Objects.requireNonNull(pps, "pps"), pps.length);
+        if (live instanceof CodecSink) {
+            try { ((CodecSink) live).onCodecConfig(latestSps, latestPps); }
+            catch (Exception failure) {
+                Sink failed = live;
+                live = null;
+                closeLive(failed);
+                failures.onFailure(failure);
+            }
+        }
+    }
+
+    public synchronized Sink releaseLiveSink() {
+        Sink released = live;
+        live = null;
+        return released;
     }
 
     public synchronized void detachLiveSink() {

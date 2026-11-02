@@ -18,7 +18,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Foreground owner of recording lifecycle. Remote transport arrives in Task 8. */
+/** Foreground owner of recording and authenticated live-video lifecycle. */
 public final class TripVideoService extends Service {
     private static final String CHANNEL = "trip-video";
     private static final int NOTIFICATION = 41;
@@ -35,6 +35,8 @@ public final class TripVideoService extends Service {
     private EglFrameEncoder encoder;
     private SegmentMuxer muxer;
     private RecordingCoordinator coordinator;
+    private VideoRelayClient liveClient;
+    private VideoRelayClient.Session pendingLiveSession;
     private String activeTripId;
     private final FrameRouter frames = new FrameRouter();
     private boolean captureRunning;
@@ -119,6 +121,8 @@ public final class TripVideoService extends Service {
         String tripId = intent.getStringExtra(VideoContract.EXTRA_TRIP_ID);
         long revision = intent.getLongExtra(VideoContract.EXTRA_STATE_REVISION, -1);
         String requestId = intent.getStringExtra(VideoContract.EXTRA_REQUEST_ID);
+        final VideoRelayClient.Session requestedLive = command == VideoContract.Command.START_LIVE
+                ? requireLiveSession(intent) : null;
         final long stagedStartMs;
         if (command == VideoContract.Command.START_TRIP) stagedStartMs = requireStartMs(intent);
         else stagedStartMs = -1;
@@ -158,9 +162,13 @@ public final class TripVideoService extends Service {
                 discardCompletedOrActive(tripId);
                 break;
             case START_LIVE:
+                closeLiveClient();
+                pendingLiveSession = requestedLive;
                 apply(ServiceStateReducer.Event.viewerConnected(nextSequence(), System.currentTimeMillis()));
+                if (liveClient == null) attachLive();
                 break;
             case STOP_LIVE:
+                closeLiveClient();
                 apply(ServiceStateReducer.Event.viewerLost(nextSequence(), System.currentTimeMillis()));
                 break;
             case TRANSFER:
@@ -209,7 +217,7 @@ public final class TripVideoService extends Service {
         switch (effect.type) {
             case START_RECORDING: startRecording(effect.tripId, reducer.state().manualRecording); break;
             case STOP_RECORDING:
-                stopPipeline();
+                stopPipeline(hasLogicalViewer());
                 if (activeTripId != null && activeTripId.equals(effect.tripId)) {
                     catalog.completeTrip(activeTripId,
                             effect.endMs >= 0 ? effect.endMs : System.currentTimeMillis());
@@ -218,23 +226,22 @@ public final class TripVideoService extends Service {
                 }
                 break;
             case PAUSE_RECORDING:
-                stopPipeline(); activeTripId = null; clearPersistedRecording(); break;
+                stopPipeline(hasLogicalViewer()); activeTripId = null; clearPersistedRecording(); break;
             case FINALIZE_TRIP: finalizeCatalogTrip(effect.tripId,
                     effect.endMs >= 0 ? effect.endMs : System.currentTimeMillis()); break;
             case START_CAPTURE:
                 if (effect.tripId == null && coordinator == null) startLiveOnly();
                 break;
-            case STOP_CAPTURE: stopPipeline(); break;
-            case ATTACH_LIVE: case DETACH_LIVE:
-                // Task 8 owns the bounded WebSocket sink. State still controls capture priority.
-                break;
+            case STOP_CAPTURE: stopPipeline(false); break;
+            case ATTACH_LIVE: attachLive(); break;
+            case DETACH_LIVE: closeLiveClient(); break;
             default: break;
         }
     }
 
     private void startRecording(String tripId, boolean manual) throws Exception {
         if (tripId.equals(activeTripId) && coordinator != null) return;
-        stopPipeline();
+        stopPipeline(liveClient != null);
         long startMs = tripStart(tripId);
         try { catalog.beginTrip(tripId, startMs,
                 manual ? VideoCatalog.Source.MANUAL : VideoCatalog.Source.AUTOMATIC); }
@@ -251,7 +258,10 @@ public final class TripVideoService extends Service {
         final SegmentMuxer output = muxer;
         encoder = new EglFrameEncoder(new EglFrameEncoder.Listener() {
             @Override public void onOutputFormat(MediaFormat format) { try { output.setOutputFormat(format); } catch (Exception e) { pipelineFailure(e); } }
-            @Override public void onCodecConfig(byte[] sps, byte[] pps) { }
+            @Override public void onCodecConfig(byte[] sps, byte[] pps) {
+                RecordingCoordinator current = coordinator;
+                if (current != null) current.onCodecConfig(sps, pps);
+            }
             @Override public void onAccessUnit(EncodedAccessUnit unit) { if (coordinator != null) coordinator.onEncodedAccessUnit(unit); }
             @Override public void onFailure(Throwable failure) { if (coordinator != null) coordinator.onCodecFailure(failure); }
         }, fps, bitrate);
@@ -262,6 +272,7 @@ public final class TripVideoService extends Service {
             throw new IllegalStateException("Could not persist active recording");
         }
         encoder.start();
+        if (liveClient != null) coordinator.attachLiveSink(liveClient);
         updateOverlay();
         long origin = System.nanoTime();
         frames.setEncoder(frame -> {
@@ -279,24 +290,30 @@ public final class TripVideoService extends Service {
                 : selected.quality == VideoSettings.Quality.HIGH ? 6_000_000 : 4_000_000;
         encoder = new EglFrameEncoder(new EglFrameEncoder.Listener() {
             @Override public void onOutputFormat(MediaFormat format) { }
-            @Override public void onCodecConfig(byte[] sps, byte[] pps) { }
+            @Override public void onCodecConfig(byte[] sps, byte[] pps) {
+                RecordingCoordinator current = coordinator;
+                if (current != null) current.onCodecConfig(sps, pps);
+            }
             @Override public void onAccessUnit(EncodedAccessUnit unit) { if (coordinator != null) coordinator.onEncodedAccessUnit(unit); }
             @Override public void onFailure(Throwable failure) { if (coordinator != null) coordinator.onCodecFailure(failure); }
         }, fps, bitrate);
         coordinator = new RecordingCoordinator(discard, this::forceStopCapture, encoder, this::pipelineFailure);
         encoder.start();
+        if (liveClient != null) coordinator.attachLiveSink(liveClient);
         updateOverlay();
         long origin = System.nanoTime();
         frames.setEncoder(frame -> { if (encoder != null) encoder.queueFrame(frame, (System.nanoTime()-origin)/1_000); });
         ensureCapture();
     }
 
-    private void stopPipeline() {
+    private void stopPipeline(boolean preserveLive) {
+        if (preserveLive && coordinator != null) coordinator.releaseLiveSink();
         frames.setEncoder(null);
         EglFrameEncoder oldEncoder = encoder; encoder = null;
         if (oldEncoder != null) oldEncoder.close();
         RecordingCoordinator oldCoordinator = coordinator; coordinator = null;
         if (oldCoordinator != null) oldCoordinator.close();
+        if (!preserveLive) closeLiveClient();
         muxer = null;
         stopCaptureIfUnused();
     }
@@ -361,6 +378,64 @@ public final class TripVideoService extends Service {
             catch (Exception nested) { fail(nested.getMessage()); }
         });
     }
+
+    private VideoRelayClient.Session requireLiveSession(Intent intent) {
+        String url = intent.getStringExtra(VideoContract.EXTRA_SESSION_URL);
+        String token = intent.getStringExtra(VideoContract.EXTRA_PRODUCER_TOKEN);
+        long expiresAt = intent.getLongExtra(VideoContract.EXTRA_EXPIRES_AT_MS, -1);
+        VideoRelayClient.Session session = new VideoRelayClient.Session(url, token, expiresAt);
+        VideoRelayClient.validateSession(session, System.currentTimeMillis());
+        return session;
+    }
+
+    private void attachLive() {
+        if (pendingLiveSession == null || coordinator == null) return;
+        VideoRelayClient.Session session = pendingLiveSession;
+        pendingLiveSession = null;
+        final VideoRelayClient[] holder = new VideoRelayClient[1];
+        VideoRelayClient created = VideoRelayClient.createDefault(
+                () -> {
+                    EglFrameEncoder current = encoder;
+                    if (current != null) current.requestKeyFrame();
+                },
+                (status, detail) -> {
+                    if (status == VideoRelayClient.Status.CONNECTING
+                            || status == VideoRelayClient.Status.CONNECTED) return;
+                    VideoRelayClient expected = holder[0];
+                    main.post(() -> liveEnded(expected));
+                }, System::currentTimeMillis);
+        holder[0] = created;
+        try {
+            created.start(session);
+            liveClient = created;
+            coordinator.attachLiveSink(created);
+        } catch (RuntimeException failure) {
+            created.close();
+            throw failure;
+        }
+    }
+
+    private void liveEnded(VideoRelayClient expected) {
+        if (expected == null || liveClient != expected) return;
+        closeLiveClient();
+        try { apply(ServiceStateReducer.Event.viewerLost(nextSequence(), System.currentTimeMillis())); }
+        catch (Exception failure) { fail(failure.getMessage()); }
+    }
+
+    private void closeLiveClient() {
+        pendingLiveSession = null;
+        VideoRelayClient old = liveClient;
+        liveClient = null;
+        if (old == null) return;
+        if (coordinator != null) coordinator.releaseLiveSink();
+        old.close();
+    }
+
+    private boolean hasLogicalViewer() {
+        return reducer.state().mode == ServiceStateReducer.Mode.LIVE_ONLY
+                || reducer.state().mode == ServiceStateReducer.Mode.RECORDING_LIVE;
+    }
+
     private void fail(String message) {
         Log.e("HavalCamera", "Video service: " + message);
         if (Build.VERSION.SDK_INT >= 26) ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
@@ -448,13 +523,13 @@ public final class TripVideoService extends Service {
     }
     private void finalizeCatalogTrip(String tripId, long endMs) throws Exception {
         if (tripId == null) return;
-        if (tripId.equals(activeTripId)) { stopPipeline(); activeTripId = null; clearPersistedRecording(); }
+        if (tripId.equals(activeTripId)) { stopPipeline(hasLogicalViewer()); activeTripId = null; clearPersistedRecording(); }
         for (VideoCatalog.Trip trip : catalog.localSnapshot())
             if (Long.toString(trip.tripId).equals(tripId) && !trip.completed) catalog.completeTrip(tripId, endMs);
         getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().remove(START_PREFIX + tripId).commit();
     }
     private void discardCompletedOrActive(String tripId) throws Exception {
-        if (tripId.equals(activeTripId)) { stopPipeline(); activeTripId = null; clearPersistedRecording(); }
+        if (tripId.equals(activeTripId)) { stopPipeline(hasLogicalViewer()); activeTripId = null; clearPersistedRecording(); }
         catalog.discardTrip(tripId);
         getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().remove(START_PREFIX + tripId).commit();
     }
@@ -465,6 +540,6 @@ public final class TripVideoService extends Service {
         }
     }
     private final LocalBinder binder = new LocalBinder();
-    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); stopPipeline(); if (capture != null) { forceStopCapture(); capture.close(); } super.onDestroy(); }
+    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); stopPipeline(false); if (capture != null) { forceStopCapture(); capture.close(); } super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return binder; }
 }
