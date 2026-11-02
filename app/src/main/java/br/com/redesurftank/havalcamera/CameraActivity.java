@@ -1,6 +1,5 @@
 package br.com.redesurftank.havalcamera;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.content.ComponentName;
 import android.content.Context;
@@ -18,7 +17,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-public final class CameraActivity extends Activity {
+public final class CameraActivity extends BackNavigationActivity {
     private final Handler handler = new Handler();
     private CameraPreview preview;
     private TextView status;
@@ -58,11 +57,7 @@ public final class CameraActivity extends Activity {
         status = new TextView(this);
         status.setTextColor(Color.WHITE); status.setTextSize(18);
         status.setPadding(20,12,20,12); status.setBackgroundColor(0x99000000);
-        LinearLayout topLeft = new LinearLayout(this);
-        topLeft.setOrientation(LinearLayout.VERTICAL);
-        topLeft.addView(ActivityNavigation.backButton(this));
-        topLeft.addView(status);
-        layout.addView(topLeft,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
+        layout.addView(status,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
         LinearLayout actions = new LinearLayout(this);
         Button retry = new Button(this); retry.setText("Conectar");
         retry.setOnClickListener(v -> { stopStream(); startStream(); });

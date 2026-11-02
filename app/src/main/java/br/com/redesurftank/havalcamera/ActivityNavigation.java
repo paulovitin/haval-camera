@@ -10,8 +10,10 @@ public final class ActivityNavigation {
 
     public static Button backButton(Activity activity) {
         Button button = new Button(activity);
-        button.setText("Voltar");
-        button.setOnClickListener(backClick(activity::finish));
+        configureBack(activity::finish, (label, click) -> {
+            button.setText(label);
+            button.setOnClickListener(click);
+        });
         return button;
     }
 
@@ -19,5 +21,7 @@ public final class ActivityNavigation {
         return view -> finish.run();
     }
 
-    static void configureBack(Runnable finish, BiConsumer<String, View.OnClickListener> control) { }
+    static void configureBack(Runnable finish, BiConsumer<String, View.OnClickListener> control) {
+        control.accept("Voltar", backClick(finish));
+    }
 }

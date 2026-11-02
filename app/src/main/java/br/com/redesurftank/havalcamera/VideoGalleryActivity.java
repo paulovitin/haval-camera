@@ -1,6 +1,5 @@
 package br.com.redesurftank.havalcamera;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
@@ -14,7 +13,7 @@ import android.widget.TextView;
 import java.net.InetAddress;
 
 /** Standalone local gallery, manual controls, and user-started LAN sharing. */
-public final class VideoGalleryActivity extends Activity {
+public final class VideoGalleryActivity extends BackNavigationActivity {
     private LinearLayout list;
     private VideoCatalog catalog;
     private LocalShareServer sharing;
@@ -39,7 +38,6 @@ public final class VideoGalleryActivity extends Activity {
         Button share = button("Compartilhar na rede local", v -> startSharing());
         Button delete = button("Apagar gravações concluídas", v -> confirmDelete());
         shareStatus = new TextView(this); shareStatus.setTextColor(Color.WHITE);
-        list.addView(ActivityNavigation.backButton(this));
         list.addView(start); list.addView(stop); list.addView(share); list.addView(delete); list.addView(shareStatus);
         setContentView(list); render();
     }
@@ -54,7 +52,7 @@ public final class VideoGalleryActivity extends Activity {
         render();
     }
     private void render() {
-        while (list.getChildCount() > 6) list.removeViewAt(6);
+        while (list.getChildCount() > 5) list.removeViewAt(5);
         for (VideoCatalog.Trip trip : catalog.localSnapshot()) {
             Button row = button((trip.completed ? "Concluída " : "Em gravação ") + trip.tripId
                     + " · " + trip.segments.size() + " segmentos", v -> {
