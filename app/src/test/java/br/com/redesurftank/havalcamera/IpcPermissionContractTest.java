@@ -15,15 +15,17 @@ public final class IpcPermissionContractTest {
     private static final String ANDROID = "http://schemas.android.com/apk/res/android";
 
     @Test public void cameraOwnsAndRequestsTheExactControlPermissionUsedForResults() throws Exception {
-        Path manifestPath = Path.of("app/src/main/AndroidManifest.xml");
+        Path sourceRoot = Files.exists(Path.of("src/main/AndroidManifest.xml"))
+                ? Path.of("src/main") : Path.of("app/src/main");
+        Path manifestPath = sourceRoot.resolve("AndroidManifest.xml");
         Element manifest = DocumentBuilderFactory.newInstance().newDocumentBuilder()
                 .parse(manifestPath.toFile()).getDocumentElement();
 
         assertTrue(hasPermission(manifest, "permission", VideoContract.CONTROL_PERMISSION));
         assertTrue(hasPermission(manifest, "uses-permission", VideoContract.CONTROL_PERMISSION));
 
-        String service = new String(Files.readAllBytes(Path.of(
-                "app/src/main/java/br/com/redesurftank/havalcamera/TripVideoService.java")),
+        String service = new String(Files.readAllBytes(sourceRoot.resolve(
+                "java/br/com/redesurftank/havalcamera/TripVideoService.java")),
                 StandardCharsets.UTF_8);
         assertTrue(service.contains("sendBroadcast(result, VideoContract.CONTROL_PERMISSION);"));
         assertEquals("br.com.redesurftank.havalcamera.permission.CONTROL",
