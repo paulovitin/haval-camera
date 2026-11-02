@@ -6,7 +6,7 @@
 
 **Architecture:** Haval Camera owns QCarCam, hardware AVC encoding, files, and transfer producers. Haval EcoTrip supplies authoritative trip state and authenticated remote commands through signature-protected IPC. The Node bridge coordinates short-lived sessions and bounded WebSocket relays; Haval Hub decodes live AVC and downloads verified completed segments.
 
-**Tech Stack:** Android API 28/SDK 36, Java 11, Shizuku 13.1.5, OpenGL ES/EGL, MediaCodec/MediaMuxer, OkHttp 5.5.1, Kotlin 2.2.10, Node 24 with `ws`, Swift 5.10, SwiftUI, VideoToolbox/AVFoundation, Xcode 26.3.
+**Tech Stack:** Android API 28/SDK 36, Java 11, Shizuku 13.1.5, OpenGL ES/EGL, MediaCodec/MediaMuxer, OkHttp 5.4.0, Kotlin 2.2.10, Node 24 with `ws`, Swift 5.10, SwiftUI, VideoToolbox/AVFoundation, Xcode 26.3.
 
 **Spec:** `docs/superpowers/specs/2026-11-02-continuous-trip-video-design.md`
 
@@ -114,7 +114,7 @@ Create `BuildSmokeTest.existingFrameSizeIsStable()` asserting `CameraPreview.WID
 
 - [ ] **Step 2: Add the Gradle project without changing source behavior**
 
-Use Gradle 8.14.3, AGP 8.12.1, Java 11, SDK 36, min/target 28, NDK `27.0.12077973`, ABI `arm64-v8a`, AIDL, external CMake, legacy JNI extraction, Shizuku 13.1.5, OkHttp 5.5.1, and JUnit 4.13.2. Generate the wrapper on the authorized Mac Mini.
+Use Gradle 8.14.3, AGP 8.12.1, Java 11, SDK 36, min/target 28, NDK `27.0.12077973`, ABI `arm64-v8a`, AIDL, external CMake, legacy JNI extraction, Shizuku 13.1.5, OkHttp 5.4.0, and JUnit 4.13.2. Generate the wrapper on the authorized Mac Mini.
 
 - [ ] **Step 3: Preserve dependency verification and signing**
 
@@ -470,7 +470,7 @@ Use MockWebServer WebSocket support. Cover producer auth query, config-first sen
 
 - [ ] **Step 4: Implement `VideoRelayClient`**
 
-Use OkHttp 5.5.1, one dispatcher thread, bounded queue, TLS-only URL validation, no payload logs, and status callbacks. Do not store producer tokens after session close.
+Use OkHttp 5.4.0, one dispatcher thread, bounded queue, TLS-only URL validation, no payload logs, and status callbacks. Do not store producer tokens after session close.
 
 - [ ] **Step 5: Integrate live-only and recording-live modes**
 

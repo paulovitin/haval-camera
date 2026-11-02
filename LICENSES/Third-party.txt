@@ -1,6 +1,6 @@
 Third-party runtime notices
 
-OkHttp 5.5.1 (com.squareup.okhttp3:okhttp / okhttp-android)
+OkHttp 5.4.0 (com.squareup.okhttp3:okhttp / okhttp-android)
 Copyright Square, Inc.
 https://github.com/lysine-dev/okhttp
 https://github.com/square/okhttp
