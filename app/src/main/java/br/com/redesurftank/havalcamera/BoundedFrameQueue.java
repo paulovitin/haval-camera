@@ -51,28 +51,32 @@ public final class BoundedFrameQueue {
     }
 
     public synchronized boolean offerConfig(byte[] data) {
+        return offerConfig(data, 0);
+    }
+
+    public synchronized boolean offerConfig(byte[] data, long transportBytes) {
         Message message = message(data, true, false);
-        if (message.size() > maxBytes) return false;
-        boolean replacedStream = messages.stream().anyMatch(existing -> !existing.config);
+        if (!validTransportBytes(transportBytes) || message.size() + transportBytes > maxBytes) {
+            return false;
+        }
         messages.clear();
         bytes = 0;
         messages.addFirst(message);
         bytes += message.size();
-        if (replacedStream) {
-            recovering = true;
-            if (!syncRequested) {
-                syncRequested = true;
-                requestSync.run();
-            }
-        }
+        enterRecovery();
         return true;
     }
 
     public synchronized boolean offerAccessUnit(byte[] data, boolean keyframe) {
+        return offerAccessUnit(data, keyframe, 0);
+    }
+
+    public synchronized boolean offerAccessUnit(byte[] data, boolean keyframe, long transportBytes) {
         Message message = message(data, false, keyframe);
+        if (!validTransportBytes(transportBytes)) return false;
         if (keyframe) {
             removeWhere(existing -> !existing.config);
-            if (!fits(message)) {
+            if (!fits(message, transportBytes)) {
                 enterRecovery();
                 return false;
             }
@@ -82,7 +86,7 @@ public final class BoundedFrameQueue {
             syncRequested = false;
             return true;
         }
-        if (recovering || !fits(message)) {
+        if (recovering || !fits(message, transportBytes)) {
             enterRecovery();
             return false;
         }
@@ -107,6 +111,7 @@ public final class BoundedFrameQueue {
     public synchronized int size() { return messages.size(); }
     public synchronized int byteSize() { return bytes; }
     public synchronized boolean isRecovering() { return recovering; }
+    public synchronized void onTransportDrop() { enterRecovery(); }
 
     private void enterRecovery() {
         recovering = true;
@@ -117,10 +122,14 @@ public final class BoundedFrameQueue {
         }
     }
 
-    private boolean fits(Message message) {
+    private boolean fits(Message message, long transportBytes) {
         return message.size() <= maxBytes
                 && messages.size() < maxMessages
-                && bytes + message.size() <= maxBytes;
+                && transportBytes + bytes + message.size() <= maxBytes;
+    }
+
+    private boolean validTransportBytes(long transportBytes) {
+        return transportBytes >= 0 && transportBytes <= maxBytes;
     }
 
     private void removeWhere(java.util.function.Predicate<Message> predicate) {

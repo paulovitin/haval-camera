@@ -37,6 +37,7 @@ public final class TripVideoService extends Service {
     private RecordingCoordinator coordinator;
     private VideoRelayClient liveClient;
     private VideoRelayClient.Session pendingLiveSession;
+    private final LiveSessionPolicy liveSessionPolicy = new LiveSessionPolicy();
     private String activeTripId;
     private final FrameRouter frames = new FrameRouter();
     private boolean captureRunning;
@@ -121,6 +122,11 @@ public final class TripVideoService extends Service {
         String tripId = intent.getStringExtra(VideoContract.EXTRA_TRIP_ID);
         long revision = intent.getLongExtra(VideoContract.EXTRA_STATE_REVISION, -1);
         String requestId = intent.getStringExtra(VideoContract.EXTRA_REQUEST_ID);
+        if (command == VideoContract.Command.START_LIVE)
+            liveSessionPolicy.requireStartAllowed(reducer.state());
+        if (command == VideoContract.Command.STOP_LIVE)
+            liveSessionPolicy.requireMatchingStop(
+                    intent.getStringExtra(VideoContract.EXTRA_SESSION_ID));
         final VideoRelayClient.Session requestedLive = command == VideoContract.Command.START_LIVE
                 ? requireLiveSession(intent) : null;
         final long stagedStartMs;
@@ -165,7 +171,9 @@ public final class TripVideoService extends Service {
                 closeLiveClient();
                 pendingLiveSession = requestedLive;
                 apply(ServiceStateReducer.Event.viewerConnected(nextSequence(), System.currentTimeMillis()));
-                if (liveClient == null) attachLive();
+                liveSessionPolicy.confirmStarted(requestedLive.sessionId, reducer.state());
+                try { if (liveClient == null) attachLive(); }
+                catch (RuntimeException failure) { closeLiveClient(); throw failure; }
                 break;
             case STOP_LIVE:
                 closeLiveClient();
@@ -233,7 +241,7 @@ public final class TripVideoService extends Service {
                 if (effect.tripId == null && coordinator == null) startLiveOnly();
                 break;
             case STOP_CAPTURE: stopPipeline(false); break;
-            case ATTACH_LIVE: attachLive(); break;
+            case ATTACH_LIVE: break;
             case DETACH_LIVE: closeLiveClient(); break;
             default: break;
         }
@@ -392,7 +400,8 @@ public final class TripVideoService extends Service {
     }
 
     private void attachLive() {
-        if (pendingLiveSession == null || coordinator == null) return;
+        if (pendingLiveSession == null) return;
+        if (coordinator == null) throw new IllegalStateException("Pipeline ao vivo indisponível");
         VideoRelayClient.Session session = pendingLiveSession;
         pendingLiveSession = null;
         final VideoRelayClient[] holder = new VideoRelayClient[1];
@@ -427,6 +436,7 @@ public final class TripVideoService extends Service {
 
     private void closeLiveClient() {
         pendingLiveSession = null;
+        liveSessionPolicy.clear();
         VideoRelayClient old = liveClient;
         liveClient = null;
         if (old == null) return;

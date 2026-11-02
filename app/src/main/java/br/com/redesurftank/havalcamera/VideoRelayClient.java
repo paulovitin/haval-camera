@@ -24,7 +24,8 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 
 /** One-session authenticated HVC1 producer. Tokens are never retried or logged. */
-public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
+public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
+        RecordingCoordinator.DropAwareSink {
     private static final int NORMAL_CLOSE = 4000;
     private static final long PING_INTERVAL_SECONDS = 10;
 
@@ -42,11 +43,13 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
         public final String url;
         public final String producerToken;
         public final long expiresAtMs;
+        public final String sessionId;
 
         public Session(String url, String producerToken, long expiresAtMs) {
             this.url = Objects.requireNonNull(url, "url");
             this.producerToken = Objects.requireNonNull(producerToken, "producerToken");
             this.expiresAtMs = expiresAtMs;
+            this.sessionId = parseSessionId(url);
         }
     }
 
@@ -133,7 +136,10 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
             finishCurrent(Status.PROTOCOL_ERROR, "invalid codec config");
             return;
         }
-        queue.offerConfig(message);
+        if (!queue.offerConfig(message, transportQueuedBytes())) {
+            finishCurrent(Status.BACKPRESSURE, "transport buffer full");
+            return;
+        }
         scheduleDrain();
     }
 
@@ -150,8 +156,12 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
             finishCurrent(Status.PROTOCOL_ERROR, "invalid access unit");
             return;
         }
-        queue.offerAccessUnit(message, unit.keyframe);
+        queue.offerAccessUnit(message, unit.keyframe, transportQueuedBytes());
         scheduleDrain();
+    }
+
+    @Override public void onDroppedAccessUnit() {
+        queue.onTransportDrop();
     }
 
     public void resetCodec() {
@@ -161,6 +171,7 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
 
     public synchronized boolean hasActiveCredentials() { return activeCredentials; }
     public int queuedMessages() { return queue.size(); }
+    public boolean isRecovering() { return queue.isRecovering(); }
 
     private WebSocketListener listener(long expectedGeneration) {
         return new WebSocketListener() {
@@ -213,11 +224,21 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
                         requestKeyframe.run();
                         continue;
                     }
-                    rejected = !socket.send(ByteString.of(message.bytes()));
-                    if (message.config && !rejected) configSent = true;
+                    long projectedBytes = socket.queueSize() + queue.byteSize() + message.size();
+                    if (projectedBytes > BoundedFrameQueue.MAX_BYTES) {
+                        if (message.config) {
+                            rejected = true;
+                        } else {
+                            queue.onTransportDrop();
+                            continue;
+                        }
+                    } else {
+                        rejected = !socket.send(ByteString.of(message.bytes()));
+                        if (message.config && !rejected) configSent = true;
+                    }
                 }
                 if (rejected) {
-                    finishCurrent(Status.NETWORK_ERROR, "send rejected");
+                    finishCurrent(Status.BACKPRESSURE, "transport buffer full");
                     return;
                 }
             }
@@ -229,6 +250,10 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
 
     private synchronized boolean canDrain() {
         return connected && activeCredentials;
+    }
+
+    private synchronized long transportQueuedBytes() {
+        return connected && socket != null ? socket.queueSize() : 0;
     }
 
     private void expire(long expectedGeneration) {
@@ -293,10 +318,8 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
                 || uri.getUserInfo() != null || uri.getFragment() != null) {
             throw new IllegalArgumentException("Live URL must be WSS without user info or fragment");
         }
-        String query = uri.getRawQuery();
-        if (query == null || !query.matches("session=[A-Za-z0-9_-]+")) {
-            throw new IllegalArgumentException("Live URL requires only a session query");
-        }
+        if (!session.sessionId.equals(parseSessionId(session.url)))
+            throw new IllegalArgumentException("Live session ID changed");
         if (session.producerToken.length() < 32 || session.producerToken.length() > 512
                 || session.url.contains(session.producerToken)) {
             throw new IllegalArgumentException("Invalid producer token");
@@ -339,10 +362,12 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
         byte[] data = new byte[source.remaining()];
         source.duplicate().get(data);
         List<byte[]> annexB = splitAnnexB(data);
-        if (!annexB.isEmpty()) return annexB.toArray(new byte[0][]);
-        List<byte[]> avcc = splitAvcc(data);
-        if (!avcc.isEmpty()) return avcc.toArray(new byte[0][]);
-        return new byte[][] { data };
+        if (!annexB.isEmpty()) {
+            annexB.forEach(VideoRelayClient::requireAvcNal);
+            return annexB.toArray(new byte[0][]);
+        }
+        if (isValidAvcNal(data)) return new byte[][] { data };
+        return splitAvcc(data).toArray(new byte[0][]);
     }
 
     private static List<byte[]> splitAnnexB(byte[] data) {
@@ -366,14 +391,38 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
         List<byte[]> result = new ArrayList<>();
         ByteBuffer buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN);
         while (buffer.hasRemaining()) {
-            if (buffer.remaining() < 4) return new ArrayList<>();
+            if (buffer.remaining() < 4) throw new IllegalArgumentException("Truncated AVCC length");
             int size = buffer.getInt();
-            if (size <= 0 || size > buffer.remaining()) return new ArrayList<>();
+            if (size <= 0 || size > buffer.remaining())
+                throw new IllegalArgumentException("Invalid AVCC NAL length");
             byte[] nal = new byte[size];
             buffer.get(nal);
+            requireAvcNal(nal);
             result.add(nal);
         }
+        if (result.isEmpty()) throw new IllegalArgumentException("Missing AVC NAL");
         return result;
+    }
+
+    private static boolean isValidAvcNal(byte[] nal) {
+        if (nal == null || nal.length == 0 || (nal[0] & 0x80) != 0) return false;
+        int type = nal[0] & 0x1f;
+        return type >= 1 && type <= 23;
+    }
+
+    private static void requireAvcNal(byte[] nal) {
+        if (!isValidAvcNal(nal)) throw new IllegalArgumentException("Invalid AVC NAL header");
+    }
+
+    private static String parseSessionId(String url) {
+        URI uri;
+        try { uri = URI.create(url); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid live URL", invalid); }
+        String query = uri.getRawQuery();
+        if (query == null || !query.matches("session=[A-Za-z0-9_-]+")) {
+            throw new IllegalArgumentException("Live URL requires only a session query");
+        }
+        return query.substring("session=".length());
     }
 
     private static int startCodeLength(byte[] data, int offset) {

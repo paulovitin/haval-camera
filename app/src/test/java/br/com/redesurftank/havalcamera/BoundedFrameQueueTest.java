@@ -19,10 +19,10 @@ public final class BoundedFrameQueueTest {
         assertTrue(queue.offerAccessUnit(bytes(20, 21, 22, 23, 24, 25, 26, 27, 28, 29), false));
         assertFalse(queue.offerAccessUnit(bytes(30, 31, 32, 33, 34, 35, 36, 37, 38, 39), false));
 
-        assertEquals(1, syncRequests.get());
+        assertEquals(2, syncRequests.get());
         assertTrue(queue.isRecovering());
         assertFalse(queue.offerAccessUnit(bytes(40), false));
-        assertEquals(1, syncRequests.get());
+        assertEquals(2, syncRequests.get());
 
         byte[] newestKeyframe = bytes(50, 51, 52);
         assertTrue(queue.offerAccessUnit(newestKeyframe, true));
@@ -74,7 +74,7 @@ public final class BoundedFrameQueueTest {
         queue.offerConfig(bytes(9));
 
         assertTrue(queue.isRecovering());
-        assertEquals(1, syncRequests.get());
+        assertEquals(2, syncRequests.get());
         BoundedFrameQueue.Message config = queue.poll();
         assertTrue(config.config);
         assertArrayEquals(bytes(9), config.bytes());

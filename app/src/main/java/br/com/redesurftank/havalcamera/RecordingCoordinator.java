@@ -18,6 +18,10 @@ public final class RecordingCoordinator implements AutoCloseable {
         void onCodecConfig(byte[] sps, byte[] pps) throws Exception;
     }
 
+    public interface DropAwareSink extends Sink {
+        void onDroppedAccessUnit();
+    }
+
     public interface Capture {
         void stop();
     }
@@ -67,7 +71,9 @@ public final class RecordingCoordinator implements AutoCloseable {
         try {
             liveExecutor.execute(() -> writeLive(destination, unit));
         } catch (java.util.concurrent.RejectedExecutionException dropped) {
-            encoder.requestKeyFrame();
+            if (destination instanceof DropAwareSink)
+                ((DropAwareSink) destination).onDroppedAccessUnit();
+            else encoder.requestKeyFrame();
         }
     }
 
