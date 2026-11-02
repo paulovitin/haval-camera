@@ -209,7 +209,7 @@ public final class CommandJournalTest {
         VideoContract.requireConfirmedDelete(false);
     }
 
-    private static final class MemoryPreferences implements SharedPreferences {
+    static final class MemoryPreferences implements SharedPreferences {
         private final Map<String, Object> values = new HashMap<>();
         private boolean failNextCommit;
 

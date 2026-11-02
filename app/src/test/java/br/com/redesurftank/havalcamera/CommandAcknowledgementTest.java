@@ -10,6 +10,8 @@ public final class CommandAcknowledgementTest {
                 VideoContract.ACTION_COMMAND_RESULT);
         assertEquals("br.com.redesurftank.havalcamera.extra.COMMAND_STATUS",
                 VideoContract.EXTRA_COMMAND_STATUS);
+        assertEquals("br.com.redesurftank.havalcamera.extra.CAMERA_REVISION",
+                VideoContract.EXTRA_CAMERA_REVISION);
         assertEquals("br.com.redesurftank.havalcamera.extra.ERROR_MESSAGE",
                 VideoContract.EXTRA_ERROR_MESSAGE);
         assertEquals("APPLIED", VideoContract.STATUS_APPLIED);

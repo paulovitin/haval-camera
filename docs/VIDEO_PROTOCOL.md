@@ -10,6 +10,10 @@ The actions are `START_TRIP`, `STOP_TRIP`, `DISCARD_TRIP`, `RECONCILE`, `START_L
 
 State revisions and settings revisions are separate counters. `RECONCILE` is authoritative and supersedes incremental state commands at the same or lower state revision. Request IDs and accepted state are persisted before an effect is executed. Replayed request IDs, older revisions, and stop/discard commands naming a non-active trip have no effect. `DELETE_COMPLETED` additionally requires explicit owner confirmation and may never delete active or transferring data.
 
+Every journaled command receives one explicit, signature-protected `COMMAND_RESULT` broadcast addressed to EcoTrip after processing. It repeats `REQUEST_ID` and the submitted `STATE_REVISION`, includes `CAMERA_REVISION`, and reports `APPLIED`, `NO_OP`, `STALE`, `REJECTED`, or `ERROR`. `APPLIED` and `NO_OP` confirm completion; the other statuses and a missing bounded acknowledgement do not authorize EcoTrip to persist commanded trip state. Camera sends no credentials or video payload in this result.
+
+An automatic `START_TRIP` may reopen a completed catalog entry only when trip ID, original `startMs`, and source match exactly and no read lease is active. Reopening clears completion metadata but preserves every completed segment; new segments continue at the next ordinal. This supports EcoTrip's bounded stop/resume window without creating a second video trip.
+
 `TELEMETRY_SAMPLE` is ephemeral: it is never entered in the request/revision journal. Its monotonic timestamp must not be in the future and must be no more than 2,000 ms old when consumed. The receiver accepts numeric speed and motor-power values only when their validity bits are set; caller-supplied display text is not accepted.
 
 `GET_SETTINGS` returns the full current snapshot and settings revision. `UPDATE_SETTINGS` carries an expected settings revision and a bounded patch. A mismatch returns the unchanged current snapshot and revision. A successful update validates and persists the complete replacement atomically, increments only the settings revision, and returns the confirmed snapshot.

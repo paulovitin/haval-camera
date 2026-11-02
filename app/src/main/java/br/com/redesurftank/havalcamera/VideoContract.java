@@ -23,6 +23,7 @@ public final class VideoContract {
     public static final String ACTION_GET_SETTINGS = ACTION_PREFIX + "GET_SETTINGS";
     public static final String ACTION_UPDATE_SETTINGS = ACTION_PREFIX + "UPDATE_SETTINGS";
     public static final String ACTION_DELETE_COMPLETED = ACTION_PREFIX + "DELETE_COMPLETED";
+    public static final String ACTION_COMMAND_RESULT = ACTION_PREFIX + "COMMAND_RESULT";
 
     // Same-package UI contracts are intentionally not part of the exported EcoTrip API.
     static final String ACTION_START_MANUAL_RECORDING = ACTION_PREFIX + "START_MANUAL_RECORDING";
@@ -52,6 +53,15 @@ public final class VideoContract {
     public static final String EXTRA_SETTINGS_PATCH = EXTRA_PREFIX + "SETTINGS_PATCH";
     public static final String EXTRA_SETTINGS_SNAPSHOT = EXTRA_PREFIX + "SETTINGS_SNAPSHOT";
     public static final String EXTRA_DELETE_CONFIRMED = EXTRA_PREFIX + "DELETE_CONFIRMED";
+    public static final String EXTRA_COMMAND_STATUS = EXTRA_PREFIX + "COMMAND_STATUS";
+    public static final String EXTRA_CAMERA_REVISION = EXTRA_PREFIX + "CAMERA_REVISION";
+    public static final String EXTRA_ERROR_MESSAGE = EXTRA_PREFIX + "ERROR_MESSAGE";
+
+    public static final String STATUS_APPLIED = "APPLIED";
+    public static final String STATUS_NO_OP = "NO_OP";
+    public static final String STATUS_STALE = "STALE";
+    public static final String STATUS_REJECTED = "REJECTED";
+    public static final String STATUS_ERROR = "ERROR";
 
     public static final int TELEMETRY_VALID_SPEED = 1;
     public static final int TELEMETRY_VALID_MOTOR_POWER = 1 << 1;

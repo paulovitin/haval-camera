@@ -69,7 +69,22 @@ public final class VideoCatalog {
         if (startMs < 0 || source == null) throw new IllegalArgumentException("Invalid trip metadata");
         MutableTrip existing = trips.get(id);
         if (existing != null) {
-            if (!existing.completed && existing.startMs == startMs && existing.source == source) {
+            if (existing.startMs == startMs && existing.source == source) {
+                if (existing.completed) {
+                    if (readLeases.getOrDefault(id, 0) > 0) {
+                        throw new IllegalStateException("Trip is being read");
+                    }
+                    Long completedEndMs = existing.endMs;
+                    existing.completed = false;
+                    existing.endMs = null;
+                    try {
+                        writeTrip(existing);
+                    } catch (IOException failure) {
+                        existing.completed = true;
+                        existing.endMs = completedEndMs;
+                        throw failure;
+                    }
+                }
                 writeIndex();
                 return;
             }

@@ -80,7 +80,10 @@ public final class TripVideoService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || intent.getAction() == null || journal == null) return START_STICKY;
         try { route(intent); }
-        catch (Exception failure) { fail(failure.getMessage()); }
+        catch (Exception failure) {
+            acknowledgeError(intent, failure);
+            fail(failure.getMessage());
+        }
         return START_STICKY;
     }
 
@@ -127,7 +130,11 @@ public final class TripVideoService extends Service {
                         editor -> editor.putLong(START_PREFIX + tripId, stagedStartMs))
                 : journal.apply(revision, requestId, command, tripId);
         if (decision.outcome != CommandJournal.Outcome.APPLIED
-                && decision.outcome != CommandJournal.Outcome.NO_OP) return;
+                && decision.outcome != CommandJournal.Outcome.NO_OP) {
+            acknowledge(requestId, revision, decision.revision,
+                    CommandAcknowledgement.statusFor(decision.outcome), null);
+            return;
+        }
         switch (command) {
             case START_TRIP:
                 if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
@@ -165,6 +172,29 @@ public final class TripVideoService extends Service {
                 deleteCompleted(); break;
             default: break;
         }
+        acknowledge(requestId, revision, decision.revision,
+                CommandAcknowledgement.statusFor(decision.outcome), null);
+    }
+
+    private void acknowledgeError(Intent request, Exception failure) {
+        String requestId = request.getStringExtra(VideoContract.EXTRA_REQUEST_ID);
+        if (requestId == null || requestId.isEmpty()) return;
+        long requestRevision = request.getLongExtra(VideoContract.EXTRA_STATE_REVISION, -1);
+        acknowledge(requestId, requestRevision, journal == null ? -1 : journal.revision(),
+                VideoContract.STATUS_ERROR, failure == null ? null : failure.getMessage());
+    }
+
+    private void acknowledge(String requestId, long requestRevision, long cameraRevision,
+            String status, String error) {
+        Intent result = new Intent(VideoContract.ACTION_COMMAND_RESULT)
+                .setPackage("br.com.redesurftank.ecotrip")
+                .putExtra(VideoContract.EXTRA_PROTOCOL_VERSION, VideoContract.PROTOCOL_VERSION)
+                .putExtra(VideoContract.EXTRA_REQUEST_ID, requestId)
+                .putExtra(VideoContract.EXTRA_STATE_REVISION, requestRevision)
+                .putExtra(VideoContract.EXTRA_CAMERA_REVISION, cameraRevision)
+                .putExtra(VideoContract.EXTRA_COMMAND_STATUS, status);
+        if (error != null) result.putExtra(VideoContract.EXTRA_ERROR_MESSAGE, error);
+        sendBroadcast(result, VideoContract.CONTROL_PERMISSION);
     }
 
     private long sequence;

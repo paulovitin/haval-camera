@@ -177,13 +177,20 @@ public final class VideoCatalogTest {
 
     @Test
     public void completedAutomaticTripReopensAndAppendsWithoutLosingSegments() throws Exception {
+        CommandJournal journal = new CommandJournal(new CommandJournalTest.MemoryPreferences());
         VideoCatalog first = new VideoCatalog(temporaryFolder.getRoot());
+        assertEquals(CommandJournal.Outcome.APPLIED,
+                journal.apply(1, "start-101", VideoContract.Command.START_TRIP, "101").outcome);
         first.beginTrip("101", 1_000, VideoCatalog.Source.AUTOMATIC);
         writePartial("101", "one");
         first.completeSegment("101",
                 new VideoCatalog.SegmentMetadata(1_000, 2_000, 1_000_000, 3, SHA_ONE, AVC));
         first.completeTrip("101", 2_000);
+        assertEquals(CommandJournal.Outcome.APPLIED,
+                journal.apply(2, "stop-101", VideoContract.Command.STOP_TRIP, "101").outcome);
 
+        assertEquals(CommandJournal.Outcome.APPLIED,
+                journal.apply(3, "resume-101", VideoContract.Command.START_TRIP, "101").outcome);
         first.beginTrip("101", 1_000, VideoCatalog.Source.AUTOMATIC);
         assertFalse(first.localSnapshot().get(0).completed);
         assertEquals(1, first.localSnapshot().get(0).segments.size());
