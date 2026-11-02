@@ -61,24 +61,27 @@ public final class RecordingCoordinatorTest {
     }
 
     @Test(timeout = 2_000)
-    public void failingLiveSinkDetachesOnlyThatSink() throws Exception {
+    public void failingLiveSinkDetachesWithoutReportingRecorderFailure() throws Exception {
         List<Long> recorded = Collections.synchronizedList(new ArrayList<>());
         AtomicInteger liveCalls = new AtomicInteger();
+        CountDownLatch liveCalled = new CountDownLatch(1);
         CountDownLatch failureReported = new CountDownLatch(1);
         RecordingCoordinator coordinator = coordinator(
                 unit -> recorded.add(unit.presentationTimeUs), () -> { }, () -> { },
                 failure -> failureReported.countDown());
         coordinator.attachLiveSink(unit -> {
             liveCalls.incrementAndGet();
+            liveCalled.countDown();
             throw new IllegalStateException("network failed");
         });
 
         coordinator.onEncodedAccessUnit(unit(1));
-        assertTrue(failureReported.await(1, TimeUnit.SECONDS));
+        assertTrue(liveCalled.await(1, TimeUnit.SECONDS));
         coordinator.onEncodedAccessUnit(unit(2));
 
         assertEquals(List.of(1L, 2L), recorded);
         assertEquals(1, liveCalls.get());
+        assertEquals(1, failureReported.getCount());
         coordinator.close();
     }
 

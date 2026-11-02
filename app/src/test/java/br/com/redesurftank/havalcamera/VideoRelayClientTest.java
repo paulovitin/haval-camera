@@ -46,6 +46,21 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void producerUrlAllowsOnlyTheSessionQueryAndNeverQueryAuthentication() {
+        Fixture fixture = new Fixture();
+
+        assertThrows(IllegalArgumentException.class, () -> fixture.client.start(
+                new VideoRelayClient.Session(
+                        "wss://bridge.example/live?session=1&token=query-secret", "x".repeat(32),
+                        fixture.now.get() + 60_000)));
+        assertThrows(IllegalArgumentException.class, () -> fixture.client.start(
+                new VideoRelayClient.Session("wss://bridge.example/live", "x".repeat(32),
+                        fixture.now.get() + 60_000)));
+
+        assertEquals(0, fixture.factory.requests.size());
+        fixture.client.close();
+    }
+
     @Test public void sendsConfigBeforeFirstAccessUnit() throws Exception {
         Fixture fixture = new Fixture();
         fixture.client.start(fixture.session("a".repeat(32)));
