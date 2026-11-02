@@ -209,12 +209,16 @@ public final class TripVideoService extends Service {
 
     private void startLiveOnly() throws Exception {
         RecordingCoordinator.Sink discard = unit -> { };
+        VideoSettings.Snapshot selected = settings.snapshot();
+        int fps = selected.quality == VideoSettings.Quality.ECONOMY ? 10 : 15;
+        int bitrate = selected.quality == VideoSettings.Quality.ECONOMY ? 2_000_000
+                : selected.quality == VideoSettings.Quality.HIGH ? 6_000_000 : 4_000_000;
         encoder = new EglFrameEncoder(new EglFrameEncoder.Listener() {
             @Override public void onOutputFormat(MediaFormat format) { }
             @Override public void onCodecConfig(byte[] sps, byte[] pps) { }
             @Override public void onAccessUnit(EncodedAccessUnit unit) { if (coordinator != null) coordinator.onEncodedAccessUnit(unit); }
             @Override public void onFailure(Throwable failure) { if (coordinator != null) coordinator.onCodecFailure(failure); }
-        });
+        }, fps, bitrate);
         coordinator = new RecordingCoordinator(discard, capture::stop, encoder, this::pipelineFailure);
         encoder.start();
         long origin = System.nanoTime();
