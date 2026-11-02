@@ -11,7 +11,7 @@ public final class ServiceStateReducer {
 
     public enum Mode { IDLE, RECORDING, LIVE_ONLY, RECORDING_LIVE }
     public enum EffectType {
-        START_RECORDING, STOP_RECORDING, START_CAPTURE, STOP_CAPTURE,
+        START_RECORDING, STOP_RECORDING, PAUSE_RECORDING, START_CAPTURE, STOP_CAPTURE,
         ATTACH_LIVE, DETACH_LIVE, PAUSE_TRANSFER, RESUME_TRANSFER, CANCEL_TRANSFER
     }
 
@@ -207,8 +207,12 @@ public final class ServiceStateReducer {
         boolean newRecording = next.tripId != null;
         boolean oldLive = old.mode == Mode.LIVE_ONLY || old.mode == Mode.RECORDING_LIVE;
         boolean newLive = next.mode == Mode.LIVE_ONLY || next.mode == Mode.RECORDING_LIVE;
-        if (oldRecording && (!newRecording || !old.tripId.equals(next.tripId)))
-            result.add(new Effect(EffectType.STOP_RECORDING, old.tripId));
+        if (oldRecording && (!newRecording || !old.tripId.equals(next.tripId))) {
+            boolean pauseAutomatic = !old.manualRecording && !next.automaticRecording
+                    && old.tripId.equals(next.authoritativeTripId);
+            result.add(new Effect(pauseAutomatic ? EffectType.PAUSE_RECORDING
+                    : EffectType.STOP_RECORDING, old.tripId));
+        }
         if ((!oldRecording && newRecording)
                 || (oldRecording && newRecording && !old.tripId.equals(next.tripId)))
             result.add(new Effect(EffectType.START_RECORDING, next.tripId));

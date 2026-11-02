@@ -55,10 +55,11 @@ public final class TripVideoService extends Service {
             capture = new CameraCaptureClient(this, (state, detail) -> {
                 if (state == CameraCaptureClient.State.ERROR) fail(detail);
             });
-            String recovered = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
-                    .getString(ACTIVE_ID, journal.activeTripId());
-            boolean recoveredManual = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
-                    .getBoolean(ACTIVE_MANUAL, false);
+            android.content.SharedPreferences serviceState = getSharedPreferences(PREFERENCES, MODE_PRIVATE);
+            boolean hasServiceRecording = serviceState.contains(ACTIVE_ID);
+            String recovered = hasServiceRecording ? serviceState.getString(ACTIVE_ID, null)
+                    : settings.snapshot().automaticRecording ? journal.activeTripId() : null;
+            boolean recoveredManual = hasServiceRecording && serviceState.getBoolean(ACTIVE_MANUAL, false);
             if (recovered != null) apply(recoveredManual
                     ? ServiceStateReducer.Event.startManual(recovered, nextSequence())
                     : ServiceStateReducer.Event.startAutomatic(recovered, nextSequence()));
@@ -157,6 +158,8 @@ public final class TripVideoService extends Service {
                     clearPersistedRecording();
                 }
                 break;
+            case PAUSE_RECORDING:
+                stopPipeline(); activeTripId = null; clearPersistedRecording(); break;
             case START_CAPTURE:
                 if (effect.tripId == null && coordinator == null) startLiveOnly();
                 break;

@@ -49,15 +49,17 @@ public final class ServiceStateReducerTest {
 
     @Test public void togglesApplyImmediatelyAndEnableCurrentTrip() {
         ServiceStateReducer reducer = new ServiceStateReducer();
-        reducer.apply(ServiceStateReducer.Event.settings(
-                1, false, false, true, true, "55"));
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("55", 1));
+        java.util.List<ServiceStateReducer.Effect> paused = reducer.apply(ServiceStateReducer.Event.settings(
+                2, false, false, true, true, "55"));
+        assertTrue(paused.stream().anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.PAUSE_RECORDING));
         assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
         reducer.apply(ServiceStateReducer.Event.settings(
-                2, true, false, true, true, "55"));
+                3, true, false, true, true, "55"));
         assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
         reducer.apply(ServiceStateReducer.Event.settings(
-                3, true, false, false, false, "55"));
-        reducer.apply(ServiceStateReducer.Event.viewerConnected(4, 1_000));
+                4, true, false, false, false, "55"));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(5, 1_000));
         assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
         assertFalse(reducer.state().transferActive);
     }
