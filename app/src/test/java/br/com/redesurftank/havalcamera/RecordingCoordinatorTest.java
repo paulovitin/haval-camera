@@ -101,6 +101,37 @@ public final class RecordingCoordinatorTest {
         coordinator.close();
     }
 
+    @Test(timeout = 2_000)
+    public void executorRejectionNotifiesLiveRecoveryWithoutAffectingRecorder() throws Exception {
+        List<Long> recorded = Collections.synchronizedList(new ArrayList<>());
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger dropped = new AtomicInteger();
+        AtomicInteger failures = new AtomicInteger();
+        RecordingCoordinator.DropAwareSink live = new RecordingCoordinator.DropAwareSink() {
+            @Override public void write(EncodedAccessUnit unit) throws Exception {
+                entered.countDown();
+                release.await();
+            }
+            @Override public void onDroppedAccessUnit() { dropped.incrementAndGet(); }
+        };
+        RecordingCoordinator coordinator = coordinator(
+                unit -> recorded.add(unit.presentationTimeUs), () -> { }, () -> { },
+                failure -> failures.incrementAndGet());
+        coordinator.attachLiveSink(live);
+
+        coordinator.onEncodedAccessUnit(unit(1));
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        coordinator.onEncodedAccessUnit(unit(2));
+        coordinator.onEncodedAccessUnit(unit(3));
+
+        assertEquals(List.of(1L, 2L, 3L), recorded);
+        assertEquals(1, dropped.get());
+        assertEquals(0, failures.get());
+        release.countDown();
+        coordinator.close();
+    }
+
     private static RecordingCoordinator coordinator(
             RecordingCoordinator.Sink recorder,
             RecordingCoordinator.Capture capture,

@@ -33,6 +33,14 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void validatedSessionExposesOnlyItsSessionId() {
+        Fixture fixture = new Fixture();
+        VideoRelayClient.Session session = fixture.session("a".repeat(32));
+
+        assertEquals("session-1", session.sessionId);
+        fixture.client.close();
+    }
+
     @Test public void onlyWssUrlsWithoutUserInfoOrFragmentsAreAccepted() {
         Fixture fixture = new Fixture();
 
@@ -110,6 +118,25 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void websocketQueueAndLocalQueueShareOneMibBound() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.client.start(fixture.session("a".repeat(32)));
+        fixture.factory.open(0);
+        fixture.client.onCodecConfig(bytes(0x67), bytes(0x68));
+        fixture.client.write(new EncodedAccessUnit(bytes(0x65), 1, true, false));
+        await(() -> fixture.factory.sockets.get(0).binary.size() == 2);
+        int sent = fixture.factory.sockets.get(0).binary.size();
+        int requests = fixture.keyframeRequests.get();
+        fixture.factory.sockets.get(0).queuedBytes = BoundedFrameQueue.MAX_BYTES - 1;
+
+        fixture.client.write(new EncodedAccessUnit(bytes(0x41, 0x01), 2, false, false));
+        await(() -> fixture.keyframeRequests.get() > requests);
+
+        assertEquals(sent, fixture.factory.sockets.get(0).binary.size());
+        assertTrue(fixture.client.isRecovering());
+        fixture.client.close();
+    }
+
     @Test public void canonicalCloseCodesMapToStatusAndClearCredentials() throws Exception {
         Fixture fixture = new Fixture();
         fixture.client.start(fixture.session("a".repeat(32)));
@@ -135,6 +162,29 @@ public final class VideoRelayClientTest {
         assertEquals(VideoRelayClient.Status.PROTOCOL_ERROR,
                 fixture.statuses.get(fixture.statuses.size() - 1));
         fixture.client.close();
+    }
+
+    @Test public void malformedAvccAndInvalidRawNalCloseOnlyLive() throws Exception {
+        Fixture malformedAvcc = new Fixture();
+        malformedAvcc.client.start(malformedAvcc.session("a".repeat(32)));
+        malformedAvcc.factory.open(0);
+        malformedAvcc.client.onCodecConfig(bytes(0x67), bytes(0x68));
+        malformedAvcc.client.write(new EncodedAccessUnit(
+                bytes(0, 0, 0, 5, 0x65), 1, true, false));
+        await(() -> !malformedAvcc.client.hasActiveCredentials());
+        assertEquals(VideoRelayClient.Status.PROTOCOL_ERROR,
+                malformedAvcc.statuses.get(malformedAvcc.statuses.size() - 1));
+        malformedAvcc.client.close();
+
+        Fixture invalidRaw = new Fixture();
+        invalidRaw.client.start(invalidRaw.session("b".repeat(32)));
+        invalidRaw.factory.open(0);
+        invalidRaw.client.onCodecConfig(bytes(0x67), bytes(0x68));
+        invalidRaw.client.write(new EncodedAccessUnit(bytes(0x00, 0x11), 1, false, false));
+        await(() -> !invalidRaw.client.hasActiveCredentials());
+        assertEquals(VideoRelayClient.Status.PROTOCOL_ERROR,
+                invalidRaw.statuses.get(invalidRaw.statuses.size() - 1));
+        invalidRaw.client.close();
     }
 
     @Test public void alreadyExpiredCredentialsFailWithoutOpeningOrRetrying() {
@@ -193,10 +243,11 @@ public final class VideoRelayClientTest {
         final List<ByteString> binary = new ArrayList<>();
         boolean canceled;
         boolean closed;
+        long queuedBytes;
 
         FakeSocket(Request request) { this.request = request; }
         @Override public Request request() { return request; }
-        @Override public long queueSize() { return 0; }
+        @Override public long queueSize() { return queuedBytes; }
         @Override public boolean send(String text) { return !closed; }
         @Override public boolean send(ByteString bytes) { binary.add(bytes); return !closed; }
         @Override public boolean close(int code, String reason) { closed = true; return true; }

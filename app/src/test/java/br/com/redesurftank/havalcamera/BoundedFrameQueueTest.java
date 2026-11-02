@@ -83,6 +83,30 @@ public final class BoundedFrameQueueTest {
         assertTrue(queue.offerAccessUnit(bytes(5), true));
     }
 
+    @Test public void initialConfigAlwaysWaitsForKeyframe() {
+        AtomicInteger syncRequests = new AtomicInteger();
+        BoundedFrameQueue queue = new BoundedFrameQueue(100, 10, syncRequests::incrementAndGet);
+
+        assertTrue(queue.offerConfig(bytes(1)));
+
+        assertTrue(queue.isRecovering());
+        assertEquals(1, syncRequests.get());
+        assertFalse(queue.offerAccessUnit(bytes(2), false));
+        assertTrue(queue.offerAccessUnit(bytes(3), true));
+        assertFalse(queue.isRecovering());
+    }
+
+    @Test public void transportBytesShareTheSameOneMibBudget() {
+        BoundedFrameQueue queue = new BoundedFrameQueue(() -> { });
+        byte[] frame = new byte[32];
+
+        assertFalse(queue.offerAccessUnit(frame, false,
+                BoundedFrameQueue.MAX_BYTES - frame.length + 1L));
+
+        assertEquals(0, queue.byteSize());
+        assertTrue(queue.isRecovering());
+    }
+
     @Test public void productionLimitsAreOneMibAndThirtyMessages() {
         assertEquals(1024 * 1024, BoundedFrameQueue.MAX_BYTES);
         assertEquals(30, BoundedFrameQueue.MAX_MESSAGES);
