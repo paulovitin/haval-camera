@@ -21,5 +21,6 @@ public final class FrameRouter {
         if (encoded != null) encoded.accept(frame);
         for (Consumer<byte[]> target : targets) target.accept(frame);
     }
+    public synchronized void closePreviews() { }
     public synchronized int previewSubscriberCount() { return previews.size(); }
 }

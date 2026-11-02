@@ -126,6 +126,9 @@ public final class ServiceStateReducer {
         public static Event viewerConnected(long sequence, long nowMs) {
             return simple(EventType.VIEWER_CONNECTED, sequence, null, nowMs);
         }
+        public static Event viewerDismissed(long sequence, long nowMs) {
+            return viewerLost(sequence, nowMs);
+        }
         public static Event viewerLost(long sequence, long nowMs) {
             return simple(EventType.VIEWER_LOST, sequence, null, nowMs);
         }
