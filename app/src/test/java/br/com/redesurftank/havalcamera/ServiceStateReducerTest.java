@@ -112,7 +112,9 @@ public final class ServiceStateReducerTest {
         reducer.apply(ServiceStateReducer.Event.settings(5, true, true, true, true, null));
         reducer.apply(ServiceStateReducer.Event.viewerConnected(6, 200_000));
         reducer.apply(ServiceStateReducer.Event.settings(7, true, false, true, true, null));
-        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+        assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
+        assertFalse(reducer.state().parkedRecording);
+        assertEquals(null, reducer.state().tripId);
     }
 
     @Test public void authoritativeStopStillFinalizesWhileAutomaticRecordingPaused() {
