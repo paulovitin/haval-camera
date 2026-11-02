@@ -26,7 +26,7 @@ public final class CommandAcknowledgementTest {
                 CommandAcknowledgement.statusFor(CommandJournal.Outcome.APPLIED));
         assertEquals(VideoContract.STATUS_NO_OP,
                 CommandAcknowledgement.statusFor(CommandJournal.Outcome.NO_OP));
-        assertEquals(VideoContract.STATUS_NO_OP,
+        assertEquals(VideoContract.STATUS_REJECTED,
                 CommandAcknowledgement.statusFor(CommandJournal.Outcome.DUPLICATE));
         assertEquals(VideoContract.STATUS_STALE,
                 CommandAcknowledgement.statusFor(CommandJournal.Outcome.STALE_REVISION));
