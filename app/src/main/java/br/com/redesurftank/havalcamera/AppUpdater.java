@@ -11,6 +11,6 @@ public final class AppUpdater implements AutoCloseable {
     public interface DownloadCallback { void verified(File apk); void failed(String reason); }
     public AppUpdater(OkHttpClient client,File cache,int installed,UpdateVerifier.ArchiveReader archives) { }
     public void check(boolean includePrerelease,Callback callback) { callback.checked(null); }
-    public void download(Offer offer,boolean confirmed,boolean idle,DownloadCallback callback) { callback.failed("Not implemented"); }
+    public void download(Offer offer,boolean confirmed,boolean idle,DownloadCallback callback) { if (callback != null) callback.failed("Not implemented"); }
     @Override public void close() { }
 }

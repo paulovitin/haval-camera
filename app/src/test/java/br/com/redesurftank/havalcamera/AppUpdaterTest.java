@@ -44,6 +44,38 @@ public class AppUpdaterTest {
             }
         } finally { cache.delete(); }
     }
+    @Test public void downloadsAndVerifiesExactApk() throws Exception { download("abc",true); }
+    @Test public void deletesCorruptDownload() throws Exception { download("abd",false); }
+    @Test public void deletesOversizedDownload() throws Exception { download("abcd",false); }
+    private void download(String bytes,boolean valid) throws Exception {
+        List<String> urls=new CopyOnWriteArrayList<>();
+        OkHttpClient client=new OkHttpClient.Builder().addInterceptor(chain -> {
+            urls.add(chain.request().url().toString());
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body(ResponseBody.create(bytes,MediaType.get("application/octet-stream"))).build();
+        }).build();
+        File cache=Files.createTempDirectory("updater-").toFile();
+        try (AppUpdater updater=new AppUpdater(client,cache,2,f -> new UpdateVerifier.Archive(
+                "br.com.redesurftank.havalcamera",3,"0.3",UpdateVerifier.APPROVED_CERT))) {
+            CountDownLatch done=new CountDownLatch(1); File[] received={null};
+            AppUpdater.Offer offer=new AppUpdater.Offer(new UpdateManifest(3,"0.3","haval-camera.apk",3,UpdateManifestTest.HASH),
+                    "https://github.com/rafaelcs28/haval-camera/releases/download/v3/haval-camera.apk","");
+            updater.download(offer,true,true,new AppUpdater.DownloadCallback() {
+                public void verified(File apk) { received[0]=apk; done.countDown(); }
+                public void failed(String error) { done.countDown(); }
+            });
+            assertTrue(done.await(5,TimeUnit.SECONDS)); assertEquals(Arrays.asList(offer.url),urls);
+            assertEquals(valid,received[0]!=null);
+            try (java.util.stream.Stream<Path> files=Files.walk(cache.toPath())) {
+                assertEquals(valid?1:0,files.filter(Files::isRegularFile).count());
+            }
+            if (valid) assertArrayEquals(new byte[]{97,98,99},Files.readAllBytes(received[0].toPath()));
+        } finally {
+            try (java.util.stream.Stream<Path> files=Files.walk(cache.toPath())) {
+                files.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        }
+    }
     @Test public void httpFailureDoesNotOfferUpdate() throws Exception {
         OkHttpClient client=new OkHttpClient.Builder().addInterceptor(chain -> new Response.Builder().request(chain.request())
                 .protocol(Protocol.HTTP_1_1).code(403).message("Forbidden").body(ResponseBody.create("{}",MediaType.get("application/json"))).build()).build();
