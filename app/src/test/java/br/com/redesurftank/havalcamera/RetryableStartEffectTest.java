@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 public final class RetryableStartEffectTest {
-    @Test public void failedEffectAfterJournalPersistenceCanBeRetriedWithANewRequest() {
+    @Test public void failedEffectAfterJournalPersistenceCanBeRetriedWithANewRequest() throws Exception {
         CommandJournal journal = new CommandJournal(new CommandJournalTest.MemoryPreferences());
         ServiceStateReducer reducer = new ServiceStateReducer();
         AtomicInteger starts = new AtomicInteger();
