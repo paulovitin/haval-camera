@@ -2,6 +2,8 @@ package br.com.redesurftank.havalcamera;
 
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.Handler;
+import android.view.View;
 import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
@@ -24,12 +26,16 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Local source-of-truth settings screen. */
-public final class VideoSettingsActivity extends BackNavigationActivity {
+public final class VideoSettingsActivity extends BackNavigationActivity implements UpdateIdleFlow.Host {
     private VideoSettings settings;
     private final Map<String, CheckBox> toggles = new HashMap<>();
     private Spinner quality, reserve, position;
     private CheckBox prerelease;
-    private Button checkUpdate;
+    private Button checkUpdate, cancelUpdate;
+    private final Handler idleHandler = new Handler();
+    private final UpdateIdleFlow idleFlow = new UpdateIdleFlow(this);
+    private Runnable idlePoll;
+    private boolean updateInProgress;
     private TextView updateStatus;
     private AppUpdater updater;
     private TripVideoService.LocalBinder videoService;
@@ -40,11 +46,13 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
     private final ServiceConnection updateConnection = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName name, IBinder binder) {
             videoService = (TripVideoService.LocalBinder) binder;
-            checkUpdate.setEnabled(updateActive && updater != null);
+            checkUpdate.setEnabled(updateActive && updater != null && !updateInProgress);
         }
         @Override public void onServiceDisconnected(ComponentName name) {
             videoService = null; checkUpdate.setEnabled(false);
-            updateStatus.setText("Serviço da câmera desconectado; atualização bloqueada.");
+            updateStatus.setText(idleFlow.isPending()
+                    ? "Aguardando reconexão e fim da gravação. Nenhuma gravação será interrompida."
+                    : "Serviço da câmera desconectado; atualização indisponível.");
         }
     };
 
@@ -74,13 +82,15 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
         checkUpdate = new Button(this); checkUpdate.setText("Verificar atualização"); checkUpdate.setEnabled(false);
         checkUpdate.setOnClickListener(v -> checkForUpdate()); content.addView(checkUpdate);
         updateStatus = new TextView(this);
-        updateStatus.setText("A atualização reinicia o app. A visualização local é encerrada ao abrir Configurações; aguarde a gravação ficar ociosa.");
+        updateStatus.setText("A atualização reinicia o app. Você poderá encerrar somente a visualização e aguardar o fim da gravação, sem interrompê-la.");
         content.addView(updateStatus);
+        cancelUpdate = new Button(this); cancelUpdate.setText("Cancelar espera");
+        cancelUpdate.setVisibility(View.GONE); content.addView(cancelUpdate);
         ScrollView scroll = new ScrollView(this); scroll.addView(content);
         setContentView(scroll); load();
     }
     @Override protected void onResume() {
-        super.onResume(); updateActive = true; prerelease.setEnabled(true);
+        super.onResume(); updateActive = true; updateInProgress = false; prerelease.setEnabled(true);
         try {
             PackageInfo installed = getPackageManager().getPackageInfo(getPackageName(), 0);
             long code = installed.getLongVersionCode();
@@ -93,27 +103,54 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
         } catch (Exception error) { updateStatus.setText("Atualização indisponível: " + error.getMessage()); }
     }
     @Override protected void onPause() {
-        updateActive = false;
+        updateActive = false; idleFlow.cancel(); stopPolling();
         if (updateDialog != null) updateDialog.dismiss(); updateDialog = null;
         if (updater != null) updater.close(); updater = null;
         if (updateBound) unbindService(updateConnection); updateBound = false; videoService = null;
         discardPendingApk(); checkUpdate.setEnabled(false);
         super.onPause();
     }
-    private boolean updateIdle() {
-        boolean idle = videoService != null && videoService.isUpdateIdle();
-        if (!idle) updateStatus.setText("Atualização bloqueada: encerre a visualização e aguarde captura e gravação ficarem ociosas. Nenhuma gravação será interrompida.");
-        return idle;
+    @Override public boolean isIdle() {
+        return updateActive && videoService != null && videoService.isUpdateIdle();
+    }
+    @Override public void endViewing() throws Exception {
+        if (videoService == null) throw new IllegalStateException("Serviço desconectado");
+        videoService.closeViewingForUpdate();
+    }
+    @Override public void offerEndViewing(Runnable accept, Runnable cancel) {
+        updateDialog = new AlertDialog.Builder(this).setTitle("Aguardar para atualizar")
+                .setMessage("A atualização reinicia o app. Encerrar somente a visualização local/remota e aguardar o fim da gravação? A gravação continuará normalmente.")
+                .setNegativeButton("Cancelar", (d,w) -> cancel.run())
+                .setPositiveButton("Encerrar visualização", (d,w) -> accept.run())
+                .setOnCancelListener(d -> cancel.run()).show();
+    }
+    @Override public void waiting(Runnable cancel) {
+        updateStatus.setText("Visualização encerrada. Aguardando captura e gravação ficarem ociosas; a atualização continuará automaticamente. Nenhuma gravação será interrompida.");
+        cancelUpdate.setOnClickListener(v -> cancel.run()); cancelUpdate.setVisibility(View.VISIBLE);
+    }
+    @Override public void schedulePoll(Runnable poll) {
+        if (idlePoll != null) idleHandler.removeCallbacks(idlePoll);
+        idlePoll = poll; idleHandler.postDelayed(poll, 500);
+    }
+    @Override public void stopPolling() {
+        if (idlePoll != null) idleHandler.removeCallbacks(idlePoll);
+        idlePoll = null;
+        if (cancelUpdate != null) cancelUpdate.setVisibility(View.GONE);
+    }
+    @Override public void cancelled(String reason) {
+        discardPendingApk(); updateFailed(reason);
     }
     private void discardPendingApk() {
         if (pendingApk != null) pendingApk.delete(); pendingApk = null;
     }
     private void updateFailed(String reason) {
         if (!updateActive) return;
+        updateInProgress = false;
         checkUpdate.setEnabled(videoService != null); prerelease.setEnabled(true); updateStatus.setText(reason);
     }
     private void checkForUpdate() {
-        if (updater == null || !updateIdle()) return;
+        if (updater == null || updateInProgress) return;
+        updateInProgress = true;
         discardPendingApk(); checkUpdate.setEnabled(false); prerelease.setEnabled(false);
         updateStatus.setText("Consultando releases do GitHub…");
         AppUpdater request = updater;
@@ -133,14 +170,16 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
         });
     }
     private void downloadUpdate(AppUpdater.Offer offer) {
-        if (!updateActive || updater == null || !updateIdle()) { checkUpdate.setEnabled(true); prerelease.setEnabled(true); return; }
+        if (!updateActive || updater == null) return;
+        idleFlow.whenIdle(() -> startUpdateDownload(offer));
+    }
+    private void startUpdateDownload(AppUpdater.Offer offer) {
         updateStatus.setText("Baixando e verificando APK…"); AppUpdater request = updater;
-        request.download(offer, true, true, new AppUpdater.DownloadCallback() {
+        request.download(offer, true, isIdle(), new AppUpdater.DownloadCallback() {
             @Override public void failed(String reason) { runOnUiThread(() -> { if (updater == request) updateFailed(reason); }); }
             @Override public void verified(File apk) { runOnUiThread(() -> {
                 if (!updateActive || updater != request) { apk.delete(); return; }
                 pendingApk = apk;
-                if (!updateIdle()) { discardPendingApk(); checkUpdate.setEnabled(true); prerelease.setEnabled(true); return; }
                 updateDialog = new AlertDialog.Builder(VideoSettingsActivity.this).setTitle("Instalar atualização verificada?")
                         .setMessage("Versão " + offer.manifest.versionName + ". Tamanho, SHA-256 e certificado aprovados. O Android pedirá confirmação e reiniciará o app.")
                         .setNegativeButton("Cancelar", (d,w) -> { discardPendingApk(); updateFailed("Instalação cancelada."); })
@@ -150,9 +189,10 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
         });
     }
     private void installUpdate(AppUpdater.Offer offer) {
-        if (!updateActive || updater == null || pendingApk == null || !updateIdle()) {
-            discardPendingApk(); checkUpdate.setEnabled(true); prerelease.setEnabled(true); return;
-        }
+        if (!updateActive || updater == null || pendingApk == null) return;
+        idleFlow.whenIdle(() -> verifyForInstallation(offer));
+    }
+    private void verifyForInstallation(AppUpdater.Offer offer) {
         if (!getPackageManager().canRequestPackageInstalls()) {
             updateDialog = new AlertDialog.Builder(this).setTitle("Permitir instalação pelo Android")
                     .setMessage("Autorize este app na próxima tela. Ao voltar, verifique a atualização novamente para confirmar o download e a instalação.")
@@ -171,7 +211,8 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
             @Override public void verified(File verified) { runOnUiThread(() -> {
                 if (!updateActive || updater != request) { verified.delete(); return; }
                 try {
-                    if (!updateIdle()) { discardPendingApk(); checkUpdate.setEnabled(true); prerelease.setEnabled(true); return; }
+                    // Capture may have restarted during async verification: wait, then verify again.
+                    if (!isIdle()) { installUpdate(offer); return; }
                     if (getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode() >= offer.manifest.versionCode)
                         throw new IllegalStateException("A versão instalada já é igual ou mais nova.");
                     Uri uri = UpdateFileProvider.uriFor(VideoSettingsActivity.this, verified);

@@ -554,6 +554,14 @@ public final class TripVideoService extends Service {
                     captureRunning, reducer.state().mode != ServiceStateReducer.Mode.IDLE
                             || activeTripId != null || encoder != null || coordinator != null);
         }
+        /** Explicit updater consent closes viewers, never a recording or its encoder. */
+        public void closeViewingForUpdate() throws Exception {
+            if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Main thread required");
+            frames.closePreviews();
+            closeLiveClient();
+            apply(ServiceStateReducer.Event.viewerDismissed(nextSequence(), System.currentTimeMillis()));
+            stopCaptureIfUnused();
+        }
         public FrameRouter.Subscription subscribePreview(java.util.function.Consumer<byte[]> consumer) {
             FrameRouter.Subscription subscription = frames.subscribe(consumer); ensureCapture();
             return () -> { subscription.close(); stopCaptureIfUnused(); };

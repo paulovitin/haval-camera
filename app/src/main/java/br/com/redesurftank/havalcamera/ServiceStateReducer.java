@@ -74,7 +74,7 @@ public final class ServiceStateReducer {
 
     public enum EventType {
         START_AUTOMATIC, STOP_AUTOMATIC, START_MANUAL, STOP_MANUAL, STOP_RECORDING,
-        VIEWER_CONNECTED, VIEWER_LOST, TRANSFER_STARTED, TRANSFER_STOPPED,
+        VIEWER_CONNECTED, VIEWER_LOST, VIEWER_DISMISSED, TRANSFER_STARTED, TRANSFER_STOPPED,
         SETTINGS, TICK, PIPELINE_FAILED
     }
 
@@ -127,7 +127,7 @@ public final class ServiceStateReducer {
             return simple(EventType.VIEWER_CONNECTED, sequence, null, nowMs);
         }
         public static Event viewerDismissed(long sequence, long nowMs) {
-            return viewerLost(sequence, nowMs);
+            return simple(EventType.VIEWER_DISMISSED, sequence, null, nowMs);
         }
         public static Event viewerLost(long sequence, long nowMs) {
             return simple(EventType.VIEWER_LOST, sequence, null, nowMs);
@@ -208,6 +208,11 @@ public final class ServiceStateReducer {
                 break;
             case VIEWER_LOST:
                 if (viewer) lostAt = event.nowMs;
+                break;
+            case VIEWER_DISMISSED:
+                // User closes viewing only: keep recording and its existing parked time limit.
+                viewer = false; lostAt = -1;
+                if (!parkedRecording) liveStarted = -1;
                 break;
             case TRANSFER_STARTED:
                 if (downloads) transfer = true;
