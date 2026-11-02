@@ -107,6 +107,38 @@ public final class BoundedFrameQueueTest {
         assertTrue(queue.isRecovering());
     }
 
+    @Test public void exactCombinedByteLimitIsAcceptedButOneByteOverRecovers() {
+        AtomicInteger syncRequests = new AtomicInteger();
+        BoundedFrameQueue queue = new BoundedFrameQueue(10, 30, syncRequests::incrementAndGet);
+
+        assertTrue(queue.offerConfig(bytes(1, 2, 3, 4), 6));
+        assertEquals(10, 6 + queue.byteSize());
+        assertFalse(queue.offerAccessUnit(bytes(5), true, 10));
+        assertTrue(queue.isRecovering());
+        assertEquals(1, syncRequests.get());
+    }
+
+    @Test public void busyTransportConsumesOneOfTheThirtyMessageSlots() {
+        BoundedFrameQueue queue = new BoundedFrameQueue(100, 3, () -> { });
+
+        assertTrue(queue.offerConfig(bytes(1), 1));
+        assertTrue(queue.offerAccessUnit(bytes(2), true, 1));
+        assertFalse(queue.offerAccessUnit(bytes(3), false, 1));
+
+        assertEquals(2, queue.size());
+        assertTrue(queue.isRecovering());
+    }
+
+    @Test public void oversizedTransportAlwaysEntersRecoveryAndRequestsSync() {
+        AtomicInteger syncRequests = new AtomicInteger();
+        BoundedFrameQueue queue = new BoundedFrameQueue(10, 3, syncRequests::incrementAndGet);
+
+        assertFalse(queue.offerAccessUnit(bytes(1), false, 11));
+
+        assertTrue(queue.isRecovering());
+        assertEquals(1, syncRequests.get());
+    }
+
     @Test public void productionLimitsAreOneMibAndThirtyMessages() {
         assertEquals(1024 * 1024, BoundedFrameQueue.MAX_BYTES);
         assertEquals(30, BoundedFrameQueue.MAX_MESSAGES);

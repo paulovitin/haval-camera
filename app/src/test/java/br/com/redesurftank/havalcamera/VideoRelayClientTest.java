@@ -9,6 +9,8 @@ import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import okhttp3.Request;
@@ -137,6 +139,29 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void interleavedDrainAndOfferDoNotSendWhileTransportIsBusy() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.client.start(fixture.session("a".repeat(32)));
+        fixture.client.onCodecConfig(bytes(0x67), bytes(0x68));
+        FakeSocket socket = fixture.factory.sockets.get(0);
+        socket.queuedBytes = 1;
+        socket.queueSizeEntered = new CountDownLatch(1);
+        socket.releaseQueueSize = new CountDownLatch(1);
+
+        fixture.factory.open(0);
+        assertTrue(socket.queueSizeEntered.await(1, TimeUnit.SECONDS));
+        Thread offer = new Thread(() -> fixture.client.write(
+                new EncodedAccessUnit(bytes(0x65), 1, true, false)));
+        offer.start();
+        socket.releaseQueueSize.countDown();
+        offer.join(1_000);
+
+        assertFalse(offer.isAlive());
+        assertEquals(0, socket.binary.size());
+        assertEquals(2, fixture.client.queuedMessages());
+        fixture.client.close();
+    }
+
     @Test public void canonicalCloseCodesMapToStatusAndClearCredentials() throws Exception {
         Fixture fixture = new Fixture();
         fixture.client.start(fixture.session("a".repeat(32)));
@@ -243,11 +268,22 @@ public final class VideoRelayClientTest {
         final List<ByteString> binary = new ArrayList<>();
         boolean canceled;
         boolean closed;
-        long queuedBytes;
+        volatile long queuedBytes;
+        volatile CountDownLatch queueSizeEntered;
+        volatile CountDownLatch releaseQueueSize;
 
         FakeSocket(Request request) { this.request = request; }
         @Override public Request request() { return request; }
-        @Override public long queueSize() { return queuedBytes; }
+        @Override public long queueSize() {
+            CountDownLatch entered = queueSizeEntered;
+            CountDownLatch release = releaseQueueSize;
+            if (entered != null) entered.countDown();
+            if (release != null) {
+                try { release.await(1, TimeUnit.SECONDS); }
+                catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            }
+            return queuedBytes;
+        }
         @Override public boolean send(String text) { return !closed; }
         @Override public boolean send(ByteString bytes) { binary.add(bytes); return !closed; }
         @Override public boolean close(int code, String reason) { closed = true; return true; }
