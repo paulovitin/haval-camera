@@ -2,6 +2,8 @@ package br.com.redesurftank.havalcamera;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.function.Consumer;
 
 /** Service-owned fanout for one capture stream. */
@@ -14,8 +16,8 @@ public final class FrameRouter {
         previews.add(destination); return () -> { synchronized (FrameRouter.this) { previews.remove(destination); } };
     }
     public void publish(byte[] frame) {
-        Consumer<byte[]> encoded; Consumer<byte[]>[] targets;
-        synchronized (this) { encoded = encoder; targets = previews.toArray(new Consumer[0]); }
+        Consumer<byte[]> encoded; List<Consumer<byte[]>> targets;
+        synchronized (this) { encoded = encoder; targets = new ArrayList<>(previews); }
         if (encoded != null) encoded.accept(frame);
         for (Consumer<byte[]> target : targets) target.accept(frame);
     }
