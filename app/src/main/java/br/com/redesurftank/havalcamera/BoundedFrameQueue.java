@@ -56,7 +56,10 @@ public final class BoundedFrameQueue {
 
     public synchronized boolean offerConfig(byte[] data, long transportBytes) {
         Message message = message(data, true, false);
-        if (!validTransportBytes(transportBytes) || message.size() + transportBytes > maxBytes) {
+        if (!transportHasRoom(transportBytes)
+                || message.size() + transportBytes > maxBytes
+                || 1 + transportMessages(transportBytes) > maxMessages) {
+            enterRecovery();
             return false;
         }
         messages.clear();
@@ -73,7 +76,10 @@ public final class BoundedFrameQueue {
 
     public synchronized boolean offerAccessUnit(byte[] data, boolean keyframe, long transportBytes) {
         Message message = message(data, false, keyframe);
-        if (!validTransportBytes(transportBytes)) return false;
+        if (!transportHasRoom(transportBytes)) {
+            enterRecovery();
+            return false;
+        }
         if (keyframe) {
             removeWhere(existing -> !existing.config);
             if (!fits(message, transportBytes)) {
@@ -124,12 +130,16 @@ public final class BoundedFrameQueue {
 
     private boolean fits(Message message, long transportBytes) {
         return message.size() <= maxBytes
-                && messages.size() < maxMessages
+                && messages.size() + transportMessages(transportBytes) < maxMessages
                 && transportBytes + bytes + message.size() <= maxBytes;
     }
 
-    private boolean validTransportBytes(long transportBytes) {
-        return transportBytes >= 0 && transportBytes <= maxBytes;
+    private boolean transportHasRoom(long transportBytes) {
+        return transportBytes >= 0 && transportBytes < maxBytes;
+    }
+
+    private int transportMessages(long transportBytes) {
+        return transportBytes > 0 ? 1 : 0;
     }
 
     private void removeWhere(java.util.function.Predicate<Message> predicate) {

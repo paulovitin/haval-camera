@@ -124,19 +124,20 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
     }
 
     @Override public void onCodecConfig(byte[] sps, byte[] pps) {
-        byte[] message;
+        boolean offered;
         try {
             synchronized (this) {
                 if (!activeCredentials || closed) return;
-                message = bytes(H264WireCodec.encodeConfig(nextSequence(), 0,
+                byte[] message = bytes(H264WireCodec.encodeConfig(nextSequence(), 0,
                         stripStartCode(sps), stripStartCode(pps)));
                 configSent = false;
+                offered = queue.offerConfig(message, transportQueuedBytesLocked());
             }
         } catch (RuntimeException malformed) {
             finishCurrent(Status.PROTOCOL_ERROR, "invalid codec config");
             return;
         }
-        if (!queue.offerConfig(message, transportQueuedBytes())) {
+        if (!offered) {
             finishCurrent(Status.BACKPRESSURE, "transport buffer full");
             return;
         }
@@ -145,27 +146,26 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
 
     @Override public void write(EncodedAccessUnit unit) {
         Objects.requireNonNull(unit, "unit");
-        byte[] message;
         try {
             synchronized (this) {
                 if (!activeCredentials || closed) return;
-                message = bytes(H264WireCodec.encodeAccessUnit(nextSequence(),
+                byte[] message = bytes(H264WireCodec.encodeAccessUnit(nextSequence(),
                         unit.presentationTimeUs, unit.keyframe, nalUnits(unit.data())));
+                queue.offerAccessUnit(message, unit.keyframe, transportQueuedBytesLocked());
             }
         } catch (RuntimeException malformed) {
             finishCurrent(Status.PROTOCOL_ERROR, "invalid access unit");
             return;
         }
-        queue.offerAccessUnit(message, unit.keyframe, transportQueuedBytes());
         scheduleDrain();
     }
 
-    @Override public void onDroppedAccessUnit() {
+    @Override public synchronized void onDroppedAccessUnit() {
         queue.onTransportDrop();
     }
 
-    public void resetCodec() {
-        synchronized (this) { configSent = false; }
+    public synchronized void resetCodec() {
+        configSent = false;
         queue.clear();
     }
 
@@ -218,13 +218,19 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
                 boolean rejected;
                 synchronized (this) {
                     if (!connected || !activeCredentials) return;
+                    long transportBytes = transportQueuedBytesLocked();
+                    if (transportBytes >= BoundedFrameQueue.MAX_BYTES) {
+                        queue.onTransportDrop();
+                        return;
+                    }
+                    if (transportBytes > 0) return;
                     BoundedFrameQueue.Message message = queue.poll();
                     if (message == null) return;
                     if (!message.config && !configSent) {
                         requestKeyframe.run();
                         continue;
                     }
-                    long projectedBytes = socket.queueSize() + queue.byteSize() + message.size();
+                    long projectedBytes = queue.byteSize() + message.size();
                     if (projectedBytes > BoundedFrameQueue.MAX_BYTES) {
                         if (message.config) {
                             rejected = true;
@@ -249,10 +255,16 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
     }
 
     private synchronized boolean canDrain() {
-        return connected && activeCredentials;
+        if (!connected || !activeCredentials) return false;
+        long transportBytes = transportQueuedBytesLocked();
+        if (transportBytes >= BoundedFrameQueue.MAX_BYTES) {
+            queue.onTransportDrop();
+            return false;
+        }
+        return transportBytes == 0;
     }
 
-    private synchronized long transportQueuedBytes() {
+    private long transportQueuedBytesLocked() {
         return connected && socket != null ? socket.queueSize() : 0;
     }
 
