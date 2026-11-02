@@ -58,35 +58,44 @@ public final class CommandJournal {
         }
 
         String previousTripId = activeTripId;
+        long nextReconcileRevision = reconcileRevision;
+        String nextActiveTripId = activeTripId;
+        String nextLastTripId = lastTripId;
         Outcome outcome = Outcome.APPLIED;
         switch (command) {
             case START_TRIP:
                 if (tripId.equals(activeTripId)) outcome = Outcome.NO_OP;
                 else {
-                    activeTripId = tripId;
-                    lastTripId = tripId;
+                    nextActiveTripId = tripId;
+                    nextLastTripId = tripId;
                 }
                 break;
             case STOP_TRIP:
             case DISCARD_TRIP:
                 if (activeTripId == null && tripId.equals(lastTripId)) outcome = Outcome.NO_OP;
                 else if (!tripId.equals(activeTripId)) return decision(Outcome.STALE_TRIP, null);
-                else activeTripId = null;
+                else nextActiveTripId = null;
                 break;
             case RECONCILE:
                 if (Objects.equals(activeTripId, tripId)) outcome = Outcome.NO_OP;
-                activeTripId = tripId;
-                if (tripId != null) lastTripId = tripId;
-                reconcileRevision = incomingRevision;
+                nextActiveTripId = tripId;
+                if (tripId != null) nextLastTripId = tripId;
+                nextReconcileRevision = incomingRevision;
                 break;
             default:
                 break;
         }
 
+        Set<String> nextRequestIds = new HashSet<>(requestIds);
+        nextRequestIds.add(requestId);
+        persistCommands(incomingRevision, nextReconcileRevision,
+                nextActiveTripId, nextLastTripId, nextRequestIds);
         revision = incomingRevision;
         hasRevision = true;
+        reconcileRevision = nextReconcileRevision;
+        activeTripId = nextActiveTripId;
+        lastTripId = nextLastTripId;
         requestIds.add(requestId);
-        persistCommands();
         return decision(outcome, previousTripId);
     }
 
@@ -100,14 +109,17 @@ public final class CommandJournal {
         }
 
         T updatedSnapshot = mutation.get();
-        settingsRevision++;
-        settingsRequestIds.add(requestId);
+        long nextSettingsRevision = settingsRevision + 1;
+        Set<String> nextSettingsRequestIds = new HashSet<>(settingsRequestIds);
+        nextSettingsRequestIds.add(requestId);
         if (!preferences.edit()
-                .putLong(SETTINGS_REVISION, settingsRevision)
-                .putStringSet(SETTINGS_REQUEST_IDS, new HashSet<>(settingsRequestIds))
+                .putLong(SETTINGS_REVISION, nextSettingsRevision)
+                .putStringSet(SETTINGS_REQUEST_IDS, nextSettingsRequestIds)
                 .commit()) {
             throw new IllegalStateException("Could not persist settings revision");
         }
+        settingsRevision = nextSettingsRevision;
+        settingsRequestIds.add(requestId);
         return new SettingsDecision<>(true, settingsRevision, updatedSnapshot);
     }
 
@@ -127,16 +139,17 @@ public final class CommandJournal {
         return new Decision(outcome, revision, activeTripId, previousTripId);
     }
 
-    private void persistCommands() {
+    private void persistCommands(long nextRevision, long nextReconcileRevision,
+            String nextActiveTripId, String nextLastTripId, Set<String> nextRequestIds) {
         SharedPreferences.Editor editor = preferences.edit()
-                .putLong(STATE_REVISION, revision)
-                .putBoolean(HAS_STATE_REVISION, hasRevision)
-                .putLong(RECONCILE_REVISION, reconcileRevision)
-                .putStringSet(REQUEST_IDS, new HashSet<>(requestIds));
-        if (activeTripId == null) editor.remove(ACTIVE_TRIP_ID);
-        else editor.putString(ACTIVE_TRIP_ID, activeTripId);
-        if (lastTripId == null) editor.remove(LAST_TRIP_ID);
-        else editor.putString(LAST_TRIP_ID, lastTripId);
+                .putLong(STATE_REVISION, nextRevision)
+                .putBoolean(HAS_STATE_REVISION, true)
+                .putLong(RECONCILE_REVISION, nextReconcileRevision)
+                .putStringSet(REQUEST_IDS, nextRequestIds);
+        if (nextActiveTripId == null) editor.remove(ACTIVE_TRIP_ID);
+        else editor.putString(ACTIVE_TRIP_ID, nextActiveTripId);
+        if (nextLastTripId == null) editor.remove(LAST_TRIP_ID);
+        else editor.putString(LAST_TRIP_ID, nextLastTripId);
         if (!editor.commit()) throw new IllegalStateException("Could not persist command journal");
     }
 
