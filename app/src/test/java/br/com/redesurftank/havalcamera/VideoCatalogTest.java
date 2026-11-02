@@ -79,6 +79,26 @@ public final class VideoCatalogTest {
     }
 
     @Test
+    public void failedIndexWriteDoesNotRollBackCommittedTripState() throws Exception {
+        VideoCatalog catalog = new VideoCatalog(temporaryFolder.getRoot());
+        catalog.beginTrip("8", 1_000, VideoCatalog.Source.AUTOMATIC);
+        File indexTemporary = new File(temporaryFolder.getRoot(), "trip-video/index.json.tmp");
+        assertTrue(indexTemporary.mkdir());
+
+        try {
+            catalog.completeTrip("8", 2_000);
+            fail("Expected index write failure");
+        } catch (java.io.IOException expected) {
+            assertEquals(1, catalog.completedSnapshot().size());
+        }
+
+        assertTrue(indexTemporary.delete());
+        VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
+        recovered.recover();
+        assertEquals(1, recovered.completedSnapshot().size());
+    }
+
+    @Test
     public void recoveryDeletesPartialButPreservesCompletedMp4() throws Exception {
         VideoCatalog first = new VideoCatalog(temporaryFolder.getRoot());
         first.beginTrip("99", 1_000, VideoCatalog.Source.MANUAL);
