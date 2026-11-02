@@ -24,6 +24,8 @@ O código pede o encerramento da captura quando a Activity sai do primeiro plano
 
 Na galeria, **Compartilhar na rede local** usa somente o primeiro IPv4 privado da rede Android ativa com transporte Wi-Fi, consultada por `ConnectivityManager` e `LinkProperties`. Não depende do nome da interface e não procura endereços em outras redes. O status mostra Wi-Fi, endereço, porta, código de pareamento e tempo restante. Sem Wi-Fi ativo ou IPv4 privado, mostra o motivo e não abre o portal. As permissões normais `ACCESS_NETWORK_STATE` e `INTERNET` permitem consultar a rede e abrir o socket local; o servidor continua temporário, somente leitura, pareado e ligado exatamente ao endereço selecionado. A validação física com central e telefone na mesma rede permanece pendente em [docs/VALIDATION.md](docs/VALIDATION.md).
 
+**Voltar** aparece na câmera, galeria, reprodução e configurações. Ele encerra somente a tela atual; a gravação automática ativa continua no serviço. O botão físico Voltar mantém seu comportamento. A posição e o toque do botão ainda precisam de validação na central Android 9.
+
 ## Compilar
 
 **Não execute builds Android, Gradle, Kotlin ou Xcode no coordenador.** Use um commit Git imutável e auditado no Mac Mini autorizado. Não envie arquivos não commitados, credenciais, keystores, caches ou logs; não use build local como fallback. O CI existente comprova somente o baseline do build manual anterior, não esta migração Gradle nem a câmera física.
