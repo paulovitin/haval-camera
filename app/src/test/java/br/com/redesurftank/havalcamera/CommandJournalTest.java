@@ -153,6 +153,28 @@ public final class CommandJournalTest {
         assertEquals(123, preferences.getLong("trip.start.10", -1));
     }
 
+    @Test public void repeatedStartAdvancesJournalWithoutOverwritingStartMetadata() {
+        MemoryPreferences preferences = new MemoryPreferences();
+        CommandJournal journal = new CommandJournal(preferences);
+        assertEquals(CommandJournal.Outcome.APPLIED, journal.applyStaged(
+                1, "start-1", VideoContract.Command.START_TRIP, "10",
+                editor -> editor.putLong("trip.start.10", 123)).outcome);
+
+        CommandJournal.Decision repeated = journal.applyStaged(
+                2, "start-2", VideoContract.Command.START_TRIP, "10",
+                editor -> editor.putLong("trip.start.10", 456));
+
+        assertEquals(CommandJournal.Outcome.NO_OP, repeated.outcome);
+        assertEquals(2, repeated.revision);
+        assertEquals(123, preferences.getLong("trip.start.10", -1));
+        CommandJournal.Decision duplicate = new CommandJournal(preferences).applyStaged(
+                3, "start-2", VideoContract.Command.START_TRIP, "10",
+                editor -> editor.putLong("trip.start.10", 789));
+        assertEquals(CommandJournal.Outcome.DUPLICATE, duplicate.outcome);
+        assertEquals(2, duplicate.revision);
+        assertEquals(123, preferences.getLong("trip.start.10", -1));
+    }
+
     @Test
     public void telemetryIsFreshnessCheckedAndNeverJournaled() {
         CommandJournal journal = new CommandJournal(new MemoryPreferences());
