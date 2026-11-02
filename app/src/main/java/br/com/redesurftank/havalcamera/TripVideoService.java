@@ -215,7 +215,7 @@ public final class TripVideoService extends Service {
             @Override public void onAccessUnit(EncodedAccessUnit unit) { if (coordinator != null) coordinator.onEncodedAccessUnit(unit); }
             @Override public void onFailure(Throwable failure) { if (coordinator != null) coordinator.onCodecFailure(failure); }
         }, fps, bitrate);
-        coordinator = new RecordingCoordinator(output, capture::stop, encoder, this::pipelineFailure);
+        coordinator = new RecordingCoordinator(output, this::forceStopCapture, encoder, this::pipelineFailure);
         activeTripId = tripId;
         if (!getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
                 .putString(ACTIVE_ID, tripId).putBoolean(ACTIVE_MANUAL, manual).commit()) {
@@ -243,7 +243,7 @@ public final class TripVideoService extends Service {
             @Override public void onAccessUnit(EncodedAccessUnit unit) { if (coordinator != null) coordinator.onEncodedAccessUnit(unit); }
             @Override public void onFailure(Throwable failure) { if (coordinator != null) coordinator.onCodecFailure(failure); }
         }, fps, bitrate);
-        coordinator = new RecordingCoordinator(discard, capture::stop, encoder, this::pipelineFailure);
+        coordinator = new RecordingCoordinator(discard, this::forceStopCapture, encoder, this::pipelineFailure);
         encoder.start();
         updateOverlay();
         long origin = System.nanoTime();
@@ -354,11 +354,15 @@ public final class TripVideoService extends Service {
                 .createNotificationChannel(new NotificationChannel(CHANNEL, "Gravação da câmera", NotificationManager.IMPORTANCE_LOW));
     }
     private void ensureCapture() {
-        if (captureRunning) return;
+        if (captureRunning || capture == null) return;
         captureRunning = true; capture.start(frames::publish);
     }
     private void stopCaptureIfUnused() {
-        if (encoder != null || frames.previewSubscriberCount() > 0 || !captureRunning) return;
+        if (encoder != null || frames.previewSubscriberCount() > 0 || !captureRunning || capture == null) return;
+        captureRunning = false; capture.stop();
+    }
+    private void forceStopCapture() {
+        if (!captureRunning || capture == null) return;
         captureRunning = false; capture.stop();
     }
     private void updateOverlay() {
@@ -404,6 +408,6 @@ public final class TripVideoService extends Service {
         }
     }
     private final LocalBinder binder = new LocalBinder();
-    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); if (capture != null) { capture.stop(); capture.close(); } super.onDestroy(); }
+    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); stopPipeline(); if (capture != null) { forceStopCapture(); capture.close(); } super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return binder; }
 }
