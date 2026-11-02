@@ -157,7 +157,10 @@ public final class CameraCaptureClient implements AutoCloseable {
             }
         } catch (Exception failure) {
             Log.e("HavalCamera", "Stream ended", failure);
-            if (run == generation) report(State.ERROR, failure.getMessage());
+            if (run == generation) {
+                stop();
+                report(State.ERROR, failure.getMessage());
+            }
         } finally {
             if (run == generation) input = null;
         }

@@ -36,6 +36,8 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
     private long segmentStartPtsUs;
     private long segmentStartMs;
     private long lastPtsUs;
+    private long timelineStartPtsUs = -1;
+    private long timelineStartMs;
 
     public SegmentMuxer(
             File filesDirectory,
@@ -125,7 +127,11 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
         muxer.start();
         segmentStartPtsUs = firstPtsUs;
         lastPtsUs = firstPtsUs;
-        segmentStartMs = System.currentTimeMillis();
+        if (timelineStartPtsUs < 0) {
+            timelineStartPtsUs = firstPtsUs;
+            timelineStartMs = System.currentTimeMillis();
+        }
+        segmentStartMs = timelineStartMs + (firstPtsUs - timelineStartPtsUs) / 1_000;
     }
 
     private void finishSegment() throws IOException {

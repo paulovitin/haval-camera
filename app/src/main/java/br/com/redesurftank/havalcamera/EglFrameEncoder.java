@@ -47,6 +47,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     private boolean framePending;
     private long pendingPtsUs;
     private volatile boolean running;
+    private volatile boolean drainRunning;
     private volatile boolean failureReported;
 
     public EglFrameEncoder(Listener listener) {
@@ -76,6 +77,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
                 candidate.start();
                 codec = candidate;
                 running = true;
+                drainRunning = true;
                 failureReported = false;
                 renderThread = new Thread(this::renderLoop, "CameraEglEncoder");
                 drainThread = new Thread(this::drainLoop, "CameraCodecDrain");
@@ -125,7 +127,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
             egl = new EglState(inputSurface);
             GlState gl = new GlState();
             overlay.onSurfaceCreated();
-            while (running) {
+            while (drainRunning) {
                 long ptsUs;
                 synchronized (this) {
                     while (running && !framePending) wait();
@@ -195,7 +197,10 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
                 }
                 boolean end = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
                 drainingCodec.releaseOutputBuffer(index, false);
-                if (end) break;
+                if (end) {
+                    drainRunning = false;
+                    break;
+                }
             }
         } catch (Throwable failure) {
             if (running) fail(failure);
@@ -213,6 +218,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
         if (failureReported) return;
         failureReported = true;
         running = false;
+        drainRunning = false;
         synchronized (this) { notifyAll(); }
         listener.onFailure(failure);
     }
@@ -233,11 +239,16 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
             codec = null;
             inputSurface = null;
         }
+        join(renderer);
         if (current != null) {
             try { current.signalEndOfInputStream(); } catch (Exception ignored) { }
         }
-        join(renderer);
         join(drainer);
+        drainRunning = false;
+        if (drainer != null && drainer.isAlive()) {
+            drainer.interrupt();
+            join(drainer);
+        }
         if (current != null) {
             try { current.stop(); } catch (Exception ignored) { }
             current.release();
@@ -275,8 +286,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     private static boolean isHardware(MediaCodecInfo info) {
         if (Build.VERSION.SDK_INT >= 29) return info.isHardwareAccelerated();
         String name = info.getName().toLowerCase(Locale.US);
-        return !name.startsWith("omx.google.") && !name.startsWith("c2.android.")
-                && !name.contains("software") && !name.contains(".sw.");
+        return name.startsWith("omx.qcom.") || name.startsWith("c2.qti.");
     }
 
     private static int shader(int kind, String source) {
