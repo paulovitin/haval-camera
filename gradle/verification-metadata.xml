@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<verification-metadata xmlns="https://schema.gradle.org/dependency-verification" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="https://schema.gradle.org/dependency-verification https://schema.gradle.org/dependency-verification/dependency-verification-1.3.xsd">
+   <!-- Bootstrap only: complete and review the resolved graph on the authorized Mac Mini before building. -->
+   <configuration>
+      <verify-metadata>true</verify-metadata>
+      <verify-signatures>false</verify-signatures>
+   </configuration>
+   <components>
+      <component group="com.android.application" name="com.android.application.gradle.plugin" version="8.12.1">
+         <artifact name="com.android.application.gradle.plugin-8.12.1.pom">
+            <sha256 value="85c4f91b220b717be055be2a6aa192289ca7d25ec020aaceb0edb851ec7c4d64" origin="https://dl.google.com/dl/android/maven2/com/android/application/com.android.application.gradle.plugin/8.12.1/com.android.application.gradle.plugin-8.12.1.pom" />
+         </artifact>
+      </component>
+      <component group="com.android.tools.build" name="gradle" version="8.12.1">
+         <artifact name="gradle-8.12.1.jar">
+            <sha256 value="bf703e8d92c598a73764a4ce9a06f60a0dddd9834ff90a8ce1e5e1308b50a37a" origin="https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.12.1/gradle-8.12.1.jar" />
+         </artifact>
+         <artifact name="gradle-8.12.1.module">
+            <sha256 value="2ee796293e1bc01a5a8cdb3f3d77121008f7200a55b577e7d5dc0b468921e8f7" origin="https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.12.1/gradle-8.12.1.module" />
+         </artifact>
+         <artifact name="gradle-8.12.1.pom">
+            <sha256 value="b07d1920468bb87f59f8b2c030711f7f3178cbfb2dce80ba24cb6fc33d950fa0" origin="https://dl.google.com/dl/android/maven2/com/android/tools/build/gradle/8.12.1/gradle-8.12.1.pom" />
+         </artifact>
+      </component>
+      <component group="com.squareup.okhttp3" name="okhttp" version="5.5.1">
+         <artifact name="okhttp-5.5.1.module">
+            <sha256 value="1c5b0837a46d13aec4493b97066c896f0f8f26e5c6b3535bec4355bce2a8e1bb" origin="https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp/5.5.1/okhttp-5.5.1.module" />
+         </artifact>
+         <artifact name="okhttp-5.5.1.pom">
+            <sha256 value="a834a8f02cbcaaf6a3968b439596e14d528a32160d4b235d95f2ab51163bbf2f" origin="https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp/5.5.1/okhttp-5.5.1.pom" />
+         </artifact>
+      </component>
+      <component group="com.squareup.okhttp3" name="okhttp-android" version="5.5.1">
+         <artifact name="okhttp-android-5.5.1.aar">
+            <sha256 value="ce00fd7751cf7e4f28ba73a0287b3cc0c62b8b83f038e428592eeef189513ee1" origin="https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp-android/5.5.1/okhttp-android-5.5.1.aar" />
+         </artifact>
+         <artifact name="okhttp-android-5.5.1.module">
+            <sha256 value="67a1f222960668845bb00002aa63424ff804584000bde84f1269ae188184e496" origin="https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp-android/5.5.1/okhttp-android-5.5.1.module" />
+         </artifact>
+         <artifact name="okhttp-android-5.5.1.pom">
+            <sha256 value="d9aa6a615a54146f08ce0e298b382e79ebe310161992040b07ed52ed29de8c3b" origin="https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp-android/5.5.1/okhttp-android-5.5.1.pom" />
+         </artifact>
+      </component>
+      <component group="com.squareup.okio" name="okio" version="3.18.1">
+         <artifact name="okio-3.18.1.module">
+            <sha256 value="1616f212eabcb6c1c2d04ff5c80d9132c0e5f4e408c659d5ee47aef28ebc5d10" origin="https://repo.maven.apache.org/maven2/com/squareup/okio/okio/3.18.1/okio-3.18.1.module" />
+         </artifact>
+         <artifact name="okio-3.18.1.pom">
+            <sha256 value="3320a24236b2b43db1515b56587b18a8a1cdf238f4465e20e3e19e5f4fd10214" origin="https://repo.maven.apache.org/maven2/com/squareup/okio/okio/3.18.1/okio-3.18.1.pom" />
+         </artifact>
+      </component>
+      <component group="com.squareup.okio" name="okio-jvm" version="3.18.1">
+         <artifact name="okio-jvm-3.18.1.jar">
+            <sha256 value="b97b640557a650d15411f2be29aef558c4e422a83653cb18ba494311dbed18be" origin="https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/3.18.1/okio-jvm-3.18.1.jar" />
+         </artifact>
+         <artifact name="okio-jvm-3.18.1.module">
+            <sha256 value="3581865143cbe7556e1975be4c823834a7b775534de856d0b355c77af946027b" origin="https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/3.18.1/okio-jvm-3.18.1.module" />
+         </artifact>
+         <artifact name="okio-jvm-3.18.1.pom">
+            <sha256 value="6457712bf7dfdfa0d1b25a303600288c34a1ff8613d55c24c8c99bcc63301dd0" origin="https://repo.maven.apache.org/maven2/com/squareup/okio/okio-jvm/3.18.1/okio-jvm-3.18.1.pom" />
+         </artifact>
+      </component>
+      <component group="dev.rikka.shizuku" name="aidl" version="13.1.5">
+         <artifact name="aidl-13.1.5.aar">
+            <sha256 value="33fe7191cdd69fcb66d649264f3b0c47acb2f3d6343afc05b98dbbff6f221963" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/aidl/13.1.5/aidl-13.1.5.aar" />
+         </artifact>
+         <artifact name="aidl-13.1.5.module">
+            <sha256 value="bdf6d47b95bf1ef005be66fa1d286e9875b0d9b8541fd3cbb7346781bc205514" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/aidl/13.1.5/aidl-13.1.5.module" />
+         </artifact>
+         <artifact name="aidl-13.1.5.pom">
+            <sha256 value="068afe284102d3629562e6807423f6d1c8a4eb3dfa62fe241c7163633daaef3a" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/aidl/13.1.5/aidl-13.1.5.pom" />
+         </artifact>
+      </component>
+      <component group="dev.rikka.shizuku" name="api" version="13.1.5">
+         <artifact name="api-13.1.5.aar">
+            <sha256 value="4def9bde498ef8626614c2fc5db9af4749c86f16f6c33e3f5658d35e70bab59b" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/api/13.1.5/api-13.1.5.aar" />
+         </artifact>
+         <artifact name="api-13.1.5.module">
+            <sha256 value="2c58ad0be2666982b569057567413f7a1194e378366e0abcac2c77e94ca9043c" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/api/13.1.5/api-13.1.5.module" />
+         </artifact>
+         <artifact name="api-13.1.5.pom">
+            <sha256 value="1e9d3b6f3a9b95580433f0486f3debb84c42f250e1fdc43a9fdcf121e14bd751" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/api/13.1.5/api-13.1.5.pom" />
+         </artifact>
+      </component>
+      <component group="dev.rikka.shizuku" name="provider" version="13.1.5">
+         <artifact name="provider-13.1.5.aar">
+            <sha256 value="b0f18cd9812464ec171c53cac93a819fe411718a3965c311f01eb4de265381b3" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/provider/13.1.5/provider-13.1.5.aar" />
+         </artifact>
+         <artifact name="provider-13.1.5.module">
+            <sha256 value="727379df3bd7f30b34ec80a223d3012c3450c85e357ed0bc2495e1347827422a" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/provider/13.1.5/provider-13.1.5.module" />
+         </artifact>
+         <artifact name="provider-13.1.5.pom">
+            <sha256 value="3413e9812ea3c3842212aa6eb04b8a785dfc25a2e114a972a0cead1ca003cd46" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/provider/13.1.5/provider-13.1.5.pom" />
+         </artifact>
+      </component>
+      <component group="dev.rikka.shizuku" name="shared" version="13.1.5">
+         <artifact name="shared-13.1.5.aar">
+            <sha256 value="4659642c9339be0a26e9c65bb8648f7ad6d8f4a465f557993ccbc78802381635" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/shared/13.1.5/shared-13.1.5.aar" />
+         </artifact>
+         <artifact name="shared-13.1.5.module">
+            <sha256 value="9d4e2790e3e639b7f5852ee7ed128ca695aeecb3dfa3c173cbf66564fe62232e" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/shared/13.1.5/shared-13.1.5.module" />
+         </artifact>
+         <artifact name="shared-13.1.5.pom">
+            <sha256 value="90a416caf523964cec3e533c0f2e9a96ecd5edc0f66888758fd80c285a2f1f7e" origin="https://repo.maven.apache.org/maven2/dev/rikka/shizuku/shared/13.1.5/shared-13.1.5.pom" />
+         </artifact>
+      </component>
+      <component group="junit" name="junit" version="4.13.2">
+         <artifact name="junit-4.13.2.jar">
+            <sha256 value="8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3" origin="https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.jar" />
+         </artifact>
+         <artifact name="junit-4.13.2.pom">
+            <sha256 value="569b6977ee4603c965c1c46c3058fa6e969291b0160eb6964dd092cd89eadd94" origin="https://repo.maven.apache.org/maven2/junit/junit/4.13.2/junit-4.13.2.pom" />
+         </artifact>
+      </component>
+      <component group="org.hamcrest" name="hamcrest-core" version="1.3">
+         <artifact name="hamcrest-core-1.3.jar">
+            <sha256 value="66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9" origin="https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar" />
+         </artifact>
+         <artifact name="hamcrest-core-1.3.pom">
+            <sha256 value="fde386a7905173a1b103de6ab820727584b50d0e32282e2797787c20a64ffa93" origin="https://repo.maven.apache.org/maven2/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.pom" />
+         </artifact>
+      </component>
+      <component group="org.jetbrains" name="annotations" version="23.0.0">
+         <artifact name="annotations-23.0.0.jar">
+            <sha256 value="7b0f19724082cbfcbc66e5abea2b9bc92cf08a1ea11e191933ed43801eb3cd05" origin="https://repo.maven.apache.org/maven2/org/jetbrains/annotations/23.0.0/annotations-23.0.0.jar" />
+         </artifact>
+         <artifact name="annotations-23.0.0.pom">
+            <sha256 value="c9490f655132328df2cfbcfdf743f53fc3916d6c1d10437175a6ca6e3a67771c" origin="https://repo.maven.apache.org/maven2/org/jetbrains/annotations/23.0.0/annotations-23.0.0.pom" />
+         </artifact>
+      </component>
+      <component group="org.jetbrains.kotlin" name="kotlin-stdlib" version="2.2.21">
+         <artifact name="kotlin-stdlib-2.2.21.jar">
+            <sha256 value="6558a3d233da56a20934b32159f9db5f86ed5816ef098f78a2c223dc6abb79dd" origin="https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.21/kotlin-stdlib-2.2.21.jar" />
+         </artifact>
+         <artifact name="kotlin-stdlib-2.2.21.module">
+            <sha256 value="bfbc657ddd3a8e37e4c8ad417968d5eb0b0b171c9fce48f962c2ad32ee434c21" origin="https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.21/kotlin-stdlib-2.2.21.module" />
+         </artifact>
+         <artifact name="kotlin-stdlib-2.2.21.pom">
+            <sha256 value="cf31f923196c63aedecd0a57c24269bd3702a4e47c0bf0bd64b5ada5de522272" origin="https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.2.21/kotlin-stdlib-2.2.21.pom" />
+         </artifact>
+      </component>
+   </components>
+</verification-metadata>
