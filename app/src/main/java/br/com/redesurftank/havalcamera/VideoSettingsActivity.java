@@ -176,7 +176,8 @@ public final class VideoSettingsActivity extends BackNavigationActivity {
                         throw new IllegalStateException("A versão instalada já é igual ou mais nova.");
                     Uri uri = UpdateFileProvider.uriFor(VideoSettingsActivity.this, verified);
                     Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE).setDataAndType(uri, UpdateFileProvider.MIME)
-                            .setClipData(ClipData.newRawUri("Atualização", uri)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    install.setClipData(ClipData.newRawUri("Atualização", uri));
                     startActivity(install);
                     pendingApk = null; // Installer owns the read grant; retain the verified cache file.
                     updateFailed("Instalador Android aberto; confirme a instalação na tela do sistema.");

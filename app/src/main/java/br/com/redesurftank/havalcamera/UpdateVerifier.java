@@ -29,7 +29,10 @@ public final class UpdateVerifier {
         return verify(file, manifest, apk -> inspectArchive(apk, pm));
     }
     static Archive inspectArchive(File apk, PackageManager pm) {
-        PackageInfo info = pm.getPackageArchiveInfo(apk.getAbsolutePath(), PackageManager.GET_SIGNING_CERTIFICATES);
+        return inspectArchive(apk, pm::getPackageArchiveInfo);
+    }
+    static Archive inspectArchive(File apk, java.util.function.BiFunction<String,Integer,PackageInfo> lookup) {
+        PackageInfo info = lookup.apply(apk.getAbsolutePath(), PackageManager.GET_SIGNING_CERTIFICATES);
         if (info == null || info.signingInfo == null) return null;
         Signature[] signers = info.signingInfo.getApkContentsSigners();
         if (signers == null) return null;

@@ -49,6 +49,16 @@ public class UpdateVerifierTest {
         try { assertFalse(UpdateVerifier.verify(file,manifest,f -> { throw new SecurityException("corrupt"); }).valid); assertFalse(file.exists()); }
         finally { file.delete(); }
     }
+    @Test public void android9ArchiveLookupCollectsAndExposesCurrentCertificates() {
+        File apk = new File("update.apk");
+        assertNull(UpdateVerifier.inspectArchive(apk, (path, flags) -> {
+            assertEquals(apk.getAbsolutePath(), path);
+            // Android 9 r1 collects/validates certificates only when GET_SIGNATURES is set.
+            assertTrue("Android 9 must collect certificates", (flags & 0x40) != 0);
+            assertTrue("Return current signer data", (flags & 0x08000000) != 0);
+            return null;
+        }));
+    }
     @Test public void requiresConnectedIdleService() {
         assertTrue(UpdateVerifier.idle(true,false,false));
         assertFalse(UpdateVerifier.idle(false,false,false));
