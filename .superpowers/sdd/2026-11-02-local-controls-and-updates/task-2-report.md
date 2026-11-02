@@ -77,3 +77,91 @@ Self-review checked `git diff 09b81cc..dbd398b --check`, all four factory call s
 ## Concerns
 
 The GREEN queue proves compilation, JVM listener behavior, and package checks. It does not prove the button is visible or tappable on the physical Android 9 display, nor that an active automatic recording continues after each tap. Task 5 must inspect all four screens and the service state on the vehicle. The Mini log retains the existing seven AndroidX annotation warnings, deprecated-API note, and `extractNativeLibs` manifest warning.
+
+## Fix round 1 — complete the contract proof
+
+The original direct-listener test could pass if one Activity omitted its button. The four Activities now inherit `BackNavigationActivity`. Its final `setContentView(View)` wraps their existing content with a top-left `ActivityNavigation.backButton(this)`, so the current content path installs the same action for every screen. The Android factory delegates label and click configuration to a JVM-testable `configureBack` method; the test observes the actual `Voltar` label and invokes the configured click to check one finish callback. Reflection tests require all four Activity classes to inherit the base and its `setContentView(View)` implementation to be final. These are JVM contract checks, not Android view execution or physical visibility proof. The gallery's five static children and active-Wi-Fi sharing logic remain unchanged because the Back button sits outside its list.
+
+**Fix-round commits:**
+
+| Commit | Purpose |
+| --- | --- |
+| `f36367c75845322b6a8b47a642369c04fb724d9d` | RED tests for all four screens and configured label/click, with inert stubs |
+| `f62700c17590cfccbac86919fc57e9e7a17a0927` | RED test requiring a final shared `setContentView(View)` method |
+| `6dc12e32741435403bc2e83617b5ad714f9d08c8` | Shared layout insertion and finish-only configuration |
+
+**RED 1 commands and output:**
+
+```text
+git push origin HEAD:codex/continuous-trip-video-impl
+/usr/local/bin/mac-mini-build submit-git /root/projects/haval-camera android-camera-verify f36367c
+content_files_scanned=90
+job=haval-camera-f36367c75845322b-20261102T230323Z-3820 pid=17688 state=queued
+archive_sha256=dae94daca9e0c1b5eaa9cb1f53c7d3a7b356728641d4a788e87674e64a799195
+/usr/local/bin/mac-mini-build status haval-camera-f36367c75845322b-20261102T230323Z-3820
+state=failed
+ActivityNavigationTest > backButtonConfigurationLabelsAndFinishes FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:29
+ActivityNavigationTest > everyScreenInheritsAutomaticBackLayout FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:16
+139 tests completed, 2 failed
+BUILD FAILED in 16s
+finished=2026-11-02T23:03:42Z rc=1
+/usr/local/bin/mac-mini-build fetch haval-camera-f36367c75845322b-20261102T230323Z-3820 /root/projects/haval-camera/.artifacts/back-navigation-fix1-red-f36367c
+./build.log: OK
+```
+
+RED 1 log SHA-256: `593a260596154a531a01a4e5ab8f73d6c65ffecc042e6c9d2e17f1459467bc6c`.
+
+**RED 2 commands and output:**
+
+```text
+git push origin HEAD:codex/continuous-trip-video-impl
+/usr/local/bin/mac-mini-build submit-git /root/projects/haval-camera android-camera-verify f62700c
+content_files_scanned=90
+job=haval-camera-f62700c17590cfcc-20261102T230437Z-2829 pid=19630 state=queued
+archive_sha256=a941cce130abaec090b4054f9fc2261a56fa5c0f9b4adeb5294cf20d7eb389e9
+/usr/local/bin/mac-mini-build status haval-camera-f62700c17590cfcc-20261102T230437Z-2829
+state=failed
+ActivityNavigationTest > backButtonConfigurationLabelsAndFinishes FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:38
+ActivityNavigationTest > sharedContentViewInstallationIsFinal FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:16
+ActivityNavigationTest > everyScreenInheritsAutomaticBackLayout FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:25
+140 tests completed, 3 failed
+BUILD FAILED in 10s
+finished=2026-11-02T23:04:50Z rc=1
+/usr/local/bin/mac-mini-build fetch haval-camera-f62700c17590cfcc-20261102T230437Z-2829 /root/projects/haval-camera/.artifacts/back-navigation-fix1-red-f62700c
+./build.log: OK
+```
+
+RED 2 log SHA-256: `c0b8d29f2acfde825c3e5005651ee6ad0ac728f81f8bd69c373f2ede63faba64`.
+
+**GREEN commands and output:**
+
+```text
+git push origin HEAD:codex/continuous-trip-video-impl
+/usr/local/bin/mac-mini-build submit-git /root/projects/haval-camera android-camera-verify 6dc12e3
+content_files_scanned=90
+job=haval-camera-6dc12e3274143540-20261102T230556Z-15963 pid=21719 state=queued
+archive_sha256=110c372b7138021436b8efc6c5cdbf8d5259fa487074bdb522530b6988db1a3f
+/usr/local/bin/mac-mini-build status haval-camera-6dc12e3274143540-20261102T230556Z-15963
+state=success
+> Task :app:testDebugUnitTest
+> Task :app:assembleDebug
+BUILD SUCCESSFUL in 19s
+> Task :app:lintVitalRelease
+> Task :app:assembleRelease
+BUILD SUCCESSFUL in 17s
+No errors detected in compressed data of /Users/consorciolimpagyn/BuildQueue/work/haval-camera-6dc12e3274143540-20261102T230556Z-15963/source/build/haval-camera.apk.
+APK: /Users/consorciolimpagyn/BuildQueue/work/haval-camera-6dc12e3274143540-20261102T230556Z-15963/source/build/haval-camera.apk
+finished=2026-11-02T23:06:37Z rc=0
+/usr/local/bin/mac-mini-build fetch haval-camera-6dc12e3274143540-20261102T230556Z-15963 /root/projects/haval-camera/.artifacts/back-navigation-fix1-green-6dc12e3
+./build.log: OK
+./haval-camera.apk: OK
+```
+
+GREEN log SHA-256: `e68b0d21d7cf7410878a61e38d5b60903767507aaa513e34f265786d47cbd95d`. Fetched release APK SHA-256: `9da1173126e623bdd8f853a9f252711949f718588268a51a448b20d89aed948d`. The full JVM suite, debug build, release build, lint vital, release signer check, ZIP alignment, and ZIP integrity passed in the authorized queue; the known annotation/deprecation/manifest warnings remain.
+
+**Self-review and limits:** `git diff ac855ce..6dc12e3 --check` passed. All four current screens call `setContentView(View)`, the final base method inserts exactly one Back button before their content, and `configureBack` attaches only a finish callback. The gallery renderer again retains its original five static children; no Task 1 Wi-Fi selection or sharing code changed. No local build, new dependency, source-text UI test, controller-ledger edit, or subagent dispatch occurred. The contract is limited to the current `setContentView(View)` path. The Android `Button` and layout remain unexecuted by JVM tests; Task 5 must inspect visibility, touch, and service continuity on the Android 9 unit.
