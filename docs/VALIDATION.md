@@ -36,6 +36,12 @@ Ao gerar um release, registre o SHA-256 do APK nos assets. Builds podem produzir
 
 As fotografias da garagem, quadros raw, logs completos e cópias de binários OEM usados na investigação não fazem parte do repositório público.
 
+## Evidência de software da gravação segmentada
+
+Em 2 de novembro de 2026, o commit `012a9576c9b0d79b` foi verificado no Mac Mini autorizado pelo job `haval-camera-012a9576c9b0d79b-20261102T192959Z-11247`. O job executou `./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug`; os testes unitários, incluindo os contratos de coordenação da gravação e do overlay de telemetria, passaram e o APK debug foi montado. O mesmo job também concluiu `build.sh`, incluindo o APK release assinado e as verificações de assinatura, alinhamento e integridade ZIP. O APK release obtido tem SHA-256 `d5005db7c051f6946ee88f70f18e502431fde00a4cc5e567d2065c3ec9ed902b`.
+
+A compilação emitiu os sete avisos já conhecidos de anotações AndroidX e API obsoleta em `CameraActivity`; não houve erro de compilação, teste ou empacotamento. Esse resultado comprova somente o escopo de software. O Gate 1 continua pendente: nenhum APK desta implementação foi instalado no carro e ainda não há evidência de encoder AVC no hardware, gravação por 10 minutos, reprodução e hashes de seis segmentos, igualdade do overlay, ausência de dumps raw, ciclo fechar/reabrir, processos órfãos, CPU, memória ou temperatura.
+
 ## Acrescentar evidência
 
 Ao testar outra central, registre modelo, versão Android, identificação pública do firmware, versão do Shizuku e modo de execução, commit/versão do APK, duração observada e resultado de cada verificação. Remova VIN, endereços de rede, credenciais e imagens pessoais antes de compartilhar diagnósticos. Marque como pendente qualquer cenário que não tenha sido executado.
