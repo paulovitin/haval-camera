@@ -29,7 +29,7 @@ public class UpdatePublicationTest {
             if (badCert || badPackage) { assertNotEquals(output,0,rc); assertFalse(Files.exists(result)); }
             else {
                 assertEquals(output,0,rc);
-                UpdateManifest manifest = UpdateManifest.parse(Files.readString(result));
+                UpdateManifest manifest = UpdateManifest.parse(new String(Files.readAllBytes(result),StandardCharsets.UTF_8));
                 assertEquals(3,manifest.versionCode); assertEquals("0.3",manifest.versionName);
                 assertEquals(3,manifest.size); assertEquals(UpdateManifestTest.HASH,manifest.sha256);
                 assertEquals("haval-camera.apk",manifest.apk);
@@ -41,6 +41,6 @@ public class UpdatePublicationTest {
         }
     }
     private void executable(Path path,String body) throws Exception {
-        Files.writeString(path,"#!/bin/sh\n"+body); assertTrue(path.toFile().setExecutable(true));
+        Files.write(path,("#!/bin/sh\n"+body).getBytes(StandardCharsets.UTF_8)); assertTrue(path.toFile().setExecutable(true));
     }
 }
