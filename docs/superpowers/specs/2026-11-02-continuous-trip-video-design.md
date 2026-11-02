@@ -85,6 +85,7 @@ Haval EcoTrip remains the control-plane owner. It:
 - forwards authenticated remote live and transfer requests received from the bridge;
 - supplies short-lived, scope-limited bridge session credentials to Haval Camera;
 - reports camera availability and transfer progress as diagnostics;
+- mirrors the Haval Camera settings snapshot and forwards validated setting changes using the same command-then-reconcile pattern as Impulse 4G controls;
 - continues normally when Haval Camera is absent, stopped, full, or failing.
 
 Haval EcoTrip never reads raw frames and never stores the bridge master credential in Haval Camera.
@@ -99,6 +100,7 @@ The bridge owns authenticated session coordination and bounded relay only. It:
 - relays metadata and requested recording chunks;
 - applies rate, size, duration, and connection limits;
 - stores recording metadata only, not video bytes;
+- relays authenticated settings snapshots and commands without becoming their source of truth;
 - expires sessions and credentials automatically.
 
 ### Haval Hub iOS app
@@ -110,11 +112,12 @@ Haval Hub owns:
 - remote trip/segment listing;
 - resumable recording downloads;
 - local download state and playback;
+- remote camera settings with optimistic feedback followed by reconciliation to the Haval Camera snapshot;
 - clear offline, unavailable, and transfer-progress states.
 
 ## User settings and safe defaults
 
-Haval Camera exposes a local settings screen. Settings persist in private app storage and remain available without Haval EcoTrip.
+Haval Camera exposes a local settings screen and remains the only settings source of truth. Settings persist in private app storage and remain available without Haval EcoTrip. Haval EcoTrip may query and change the same settings through signature-protected IPC, then republishes the confirmed snapshot to Haval Hub. The bridge and clients never maintain an independent authoritative copy.
 
 - Automatic trip recording: on by default. Haval Camera still stores the latest authoritative trip state while disabled, so enabling it can start the current trip without replaying stale commands.
 - Record parked live sessions: off by default. When enabled, only an authenticated parked live session is recorded; this is not continuous sentry recording.
@@ -195,6 +198,9 @@ All cross-app commands are explicit and protected by a custom signature permissi
 - `STOP_LIVE(sessionId)`: detach relay and stop live-only capture when no viewer remains.
 - `TRANSFER(requestId, tripId, segmentIds, viewerSession)`: send completed files from requested offsets.
 - `CANCEL_TRANSFER(requestId)`: stop file reads and network transfer.
+- `GET_SETTINGS(requestId)`: return the current settings snapshot and settings revision.
+- `UPDATE_SETTINGS(requestId, expectedRevision, patch)`: validate and atomically apply a bounded settings patch, then return the full confirmed snapshot.
+- `DELETE_COMPLETED(requestId)`: after an explicit owner confirmation upstream, delete completed local recordings while preserving active and transferring trips.
 
 Rules:
 
@@ -204,6 +210,7 @@ Rules:
 - `RECONCILE` carries the complete authoritative state and supersedes delayed incremental commands at the same or lower revision.
 - Starting a different trip finalizes the previous active segment before switching.
 - A stop or discard for a stale trip ID cannot affect the current trip.
+- Settings use their own monotonic revision. A stale expected revision is rejected with the current snapshot so optimistic remote controls reconcile instead of overwriting a newer local change.
 - A trip shorter than Haval EcoTrip acceptance rules is deleted after `DISCARD_TRIP`.
 - If Haval Camera is missing or unavailable, Haval EcoTrip logs the condition and continues.
 - Binder, service, or network work never runs while holding the TripManager state lock.

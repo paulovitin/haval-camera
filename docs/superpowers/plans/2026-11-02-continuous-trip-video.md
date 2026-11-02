@@ -47,6 +47,7 @@
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoContract.java`: stable actions, extras, permissions, and protocol constants.
 - `app/src/main/java/br/com/redesurftank/havalcamera/CommandJournal.java`: persisted command revision and replay decisions.
 - `app/src/main/java/br/com/redesurftank/havalcamera/H264WireCodec.java`: live-message framing and AVC payload validation.
+- `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettings.java`: validated persisted settings, revision, snapshots, and atomic patches.
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoCatalog.java`: trip/segment metadata and atomic index writes.
 - `app/src/main/java/br/com/redesurftank/havalcamera/RetentionPlanner.java`: pure oldest-trip deletion selection.
 - `app/src/main/java/br/com/redesurftank/havalcamera/SegmentMuxer.java`: 60-second `.partial` to MP4 lifecycle.
@@ -163,11 +164,11 @@ git commit -m "build: migrate camera app to verified Gradle build"
 
 - [ ] **Step 1: Write failing command-order tests**
 
-Assert duplicate request IDs are ignored, lower revisions are ignored after restart, stale stop/discard cannot affect a newer trip, and `RECONCILE` supersedes incremental commands at the same or lower revision.
+Assert duplicate request IDs are ignored, lower revisions are ignored after restart, stale stop/discard cannot affect a newer trip, `RECONCILE` supersedes incremental commands at the same or lower revision, and stale settings revisions return the current snapshot without mutation.
 
 - [ ] **Step 2: Implement `VideoContract` and `CommandJournal`**
 
-Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence.
+Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence. Include `GET_SETTINGS`, revision-checked `UPDATE_SETTINGS`, and confirmed `DELETE_COMPLETED` contracts.
 
 - [ ] **Step 3: Write failing framing tests**
 
@@ -354,7 +355,9 @@ git commit -m "feat: add camera recording service and settings"
 
 **Files:**
 - Create: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/TripVideoBridge.kt`
+- Create: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/CameraSettingsReader.kt`
 - Create: `/root/projects/haval-ecotrip/app/src/test/java/br/com/redesurftank/ecotrip/managers/TripVideoBridgeTest.kt`
+- Create: `/root/projects/haval-ecotrip/app/src/test/java/br/com/redesurftank/ecotrip/managers/CameraSettingsReaderTest.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/TripManager.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/services/CarTelemetryService.kt`
 - Modify: `/root/projects/haval-ecotrip/app/src/main/java/br/com/redesurftank/ecotrip/managers/MqttManager.kt`
@@ -362,7 +365,7 @@ git commit -m "feat: add camera recording service and settings"
 
 **Interfaces:**
 - Consumes: `TripManager.getActiveAutoTripStartMs(): Long?`, completed history, MQTT video commands, Task 2 explicit actions.
-- Produces: `TripVideoBridge.reconcile(activeTripId, completedIds)`, `handleRemoteCommand(command, payload)`, catalog publication, and status results.
+- Produces: `TripVideoBridge.reconcile(activeTripId, completedIds)`, `handleRemoteCommand(command, payload)`, catalog/settings publication, and confirmed status results.
 
 - [ ] **Step 1: Restore authorized Git source before editing**
 
@@ -388,17 +391,21 @@ Add `video_live_start`, `video_live_stop`, `video_transfer`, `video_transfer_can
 
 Request camera control/read signature permissions. Register an explicit signature-protected catalog-change receiver, query the provider, and publish only completed-trip metadata through existing MQTT result patterns.
 
-- [ ] **Step 7: Verify on Mac Mini**
+- [ ] **Step 7: Mirror settings using the proven Impulse pattern**
+
+Model `CameraSettingsReader` on `ConnectivityStatusReader`: query the full Haval Camera snapshot, publish retained state, use provider `call()` for updates, copy the complete typed response, and re-query after every command. Validate allowed keys and values before IPC. Return stale-revision conflicts with the confirmed snapshot. Never calculate camera settings independently in EcoTrip.
+
+- [ ] **Step 8: Verify on Mac Mini**
 
 Run the focused unit test task for `TripVideoBridgeTest`, then the repository's authorized Android debug build.
 
 Expected: tests and build pass; installing without Haval Camera leaves telemetry healthy and logs one bounded availability error.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add app/src/main app/src/test
-git commit -m "feat: bridge trip video lifecycle to camera app"
+git commit -m "feat: bridge trip video lifecycle and settings"
 ```
 
 ### Task 7: Bridge Live Session and Bounded Relay
@@ -557,7 +564,7 @@ git commit -m "feat: add live vehicle camera viewer"
 
 **Interfaces:**
 - Consumes: complete catalog snapshots and HVT1 chunks.
-- Produces: `GET /api/video/catalog`, `POST /api/video/transfer/session`, `/ws/video/transfer/car`, `/ws/video/transfer/viewer`.
+- Produces: `GET /api/video/catalog`, `GET /api/video/settings`, `PATCH /api/video/settings`, `DELETE /api/video/recordings`, `POST /api/video/transfer/session`, `/ws/video/transfer/car`, `/ws/video/transfer/viewer`.
 
 - [ ] **Step 1: Write failing catalog tests**
 
@@ -567,25 +574,29 @@ Assert atomic revision replacement, completed trips only, stale `updatedAt`, ret
 
 Cover 256 KiB maximum chunks, segment ordinal/offset bounds, per-chunk SHA-256, acknowledged offset, reconnect with new token bound to the same transfer ID, expired token rejection, one transfer, live-pauses-transfer, cancellation, and cleanup.
 
-- [ ] **Step 3: Implement catalog cache and transfer sessions**
+- [ ] **Step 3: Write failing settings-control tests**
 
-Keep metadata JSON in existing mutable data storage using atomic writes. Keep chunk bytes only in socket writes. Never use the existing `rec_cache` or `express.raw` upload path for video.
+Cover owner auth, complete retained snapshot, bounded patch keys/values, expected revision, stale conflict returning current state, offline car, correlated result timeout, and explicit confirmation token for deleting completed recordings.
 
-- [ ] **Step 4: Add routes and MQTT control**
+- [ ] **Step 4: Implement catalog cache, settings snapshot, and transfer sessions**
 
-Reuse owner auth and result correlation, but use distinct `video_*` topics and session state so audio recording behavior remains unchanged.
+Keep catalog and settings metadata JSON in existing mutable data storage using atomic writes. Treat settings as a last-confirmed snapshot, never as bridge authority. Keep chunk bytes only in socket writes. Never use the existing `rec_cache` or `express.raw` upload path for video.
 
-- [ ] **Step 5: Verify**
+- [ ] **Step 5: Add routes and MQTT control**
+
+Reuse owner auth and result correlation, but use distinct `video_*` topics and session state so audio recording behavior remains unchanged. Follow existing uplink command semantics: optimistic client state, correlated command result, then authoritative snapshot reconciliation.
+
+- [ ] **Step 6: Verify**
 
 Run: `/root/.local/share/node24/bin/node --test test/video-relay.test.js`
 
 Expected: catalog and transfer tests pass with no video files created.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add server.js video-relay.js test/video-relay.test.js docs/video.md
-git commit -m "feat: relay resumable camera recordings"
+git commit -m "feat: relay camera recordings and settings"
 ```
 
 ### Task 11: Camera Catalog Publication and Transfer Producer
@@ -637,17 +648,18 @@ git commit -m "feat: publish and transfer trip recordings"
 **Files:**
 - Create: `/root/projects/haval-ecotrip/ios-app/HavalEcoTrip/CameraVideoStore.swift`
 - Create: `/root/projects/haval-ecotrip/ios-app/HavalEcoTrip/CameraRecordingsView.swift`
+- Create: `/root/projects/haval-ecotrip/ios-app/HavalEcoTrip/CameraSettingsView.swift`
 - Create: `/root/projects/haval-ecotrip/ios-app/CameraVideoTests/CameraVideoStoreTests.swift`
 - Modify: `/root/projects/haval-ecotrip/ios-app/HavalEcoTrip/CameraVideoProtocol.swift`
 - Modify: `/root/projects/haval-ecotrip/ios-app/HavalEcoTrip/GravacoesV2View.swift`
 
 **Interfaces:**
 - Consumes: Task 10 catalog/transfer APIs and HVT1 chunks.
-- Produces: remote/local gallery, resumable downloads, verified local files, ordered playback, and share/export.
+- Produces: remote/local gallery, resumable downloads, verified local files, ordered playback, share/export, and reconciled remote settings.
 
 - [ ] **Step 1: Write failing store tests**
 
-Cover stale/offline catalog labels, active trip absent, expired footage, offset persistence, new-token resume, chunk/whole-file SHA-256 mismatch, insufficient iPhone storage, cancellation, duplicate segment, and atomic promotion from `.partial`.
+Cover stale/offline catalog labels, active trip absent, expired footage, offset persistence, new-token resume, chunk/whole-file SHA-256 mismatch, insufficient iPhone storage, cancellation, duplicate segment, atomic promotion from `.partial`, optimistic settings, confirmed snapshot reconciliation, stale revision, and command failure rollback.
 
 - [ ] **Step 2: Implement `CameraVideoStore`**
 
@@ -657,17 +669,21 @@ Keep downloaded video under Application Support, store a small local index, rese
 
 Add a distinct “Vídeos” section beside existing cabin-audio recordings. Show car-only, downloading, local, expired, stale, and error states. Play ordered local MP4 segments; permit system share only after checksum verification.
 
-- [ ] **Step 4: Verify on Mac Mini**
+- [ ] **Step 4: Implement remote camera settings**
+
+Mirror the proven `ConectividadeView` interaction: show the last confirmed car snapshot, apply optimistic controls with progress, then replace them with the command result and next settings snapshot. Expose the same safe presets/toggles as Haval Camera. Require a separate confirmation before deleting completed recordings. Clearly label stale/offline state.
+
+- [ ] **Step 5: Verify on Mac Mini**
 
 Run focused CameraVideoTests, then build `HavalEcoTrip` for Simulator with signing disabled.
 
 Expected: all download/catalog tests pass and existing audio recording views still compile unchanged.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add ios-app/HavalEcoTrip ios-app/CameraVideoTests
-git commit -m "feat: add trip video gallery and downloads"
+git commit -m "feat: add trip video gallery and camera settings"
 ```
 
 ### Task 13: End-to-End Safety Gates and Controlled Rollout
