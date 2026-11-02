@@ -5,11 +5,20 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.view.View;
+import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 
 public final class ActivityNavigationTest {
+    @Test public void sharedContentViewInstallationIsFinal() {
+        assertTrue(Arrays.stream(BackNavigationActivity.class.getDeclaredMethods()).anyMatch(method ->
+                method.getName().equals("setContentView")
+                        && Arrays.equals(new Class<?>[]{View.class}, method.getParameterTypes())
+                        && Modifier.isFinal(method.getModifiers())));
+    }
+
     @Test public void everyScreenInheritsAutomaticBackLayout() {
         for (Class<?> screen : new Class<?>[]{CameraActivity.class, VideoGalleryActivity.class,
                 VideoPlaybackActivity.class, VideoSettingsActivity.class}) {
