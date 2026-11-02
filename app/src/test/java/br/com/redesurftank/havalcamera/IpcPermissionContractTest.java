@@ -18,8 +18,10 @@ public final class IpcPermissionContractTest {
         Path sourceRoot = Files.exists(Path.of("src/main/AndroidManifest.xml"))
                 ? Path.of("src/main") : Path.of("app/src/main");
         Path manifestPath = sourceRoot.resolve("AndroidManifest.xml");
-        Element manifest = DocumentBuilderFactory.newInstance().newDocumentBuilder()
-                .parse(manifestPath.toFile()).getDocumentElement();
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        Element manifest = factory.newDocumentBuilder().parse(manifestPath.toFile())
+                .getDocumentElement();
 
         assertTrue(hasPermission(manifest, "permission", VideoContract.CONTROL_PERMISSION));
         assertTrue(hasPermission(manifest, "uses-permission", VideoContract.CONTROL_PERMISSION));
