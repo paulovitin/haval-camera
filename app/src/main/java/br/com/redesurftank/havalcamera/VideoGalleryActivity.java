@@ -12,8 +12,6 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.util.Collections;
 
 /** Standalone local gallery, manual controls, and user-started LAN sharing. */
 public final class VideoGalleryActivity extends Activity {
@@ -66,23 +64,15 @@ public final class VideoGalleryActivity extends Activity {
         }
     }
     private void startSharing() {
+        stopSharing();
         try {
-            if (sharing != null) sharing.close();
-            InetAddress address = privateWifiAddress();
+            InetAddress address = ActiveWifiAddress.from(this);
             sharing = new LocalShareServer(address, getFilesDir(), catalog);
-            shareStatus.setTag("http://" + address.getHostAddress() + ":" + sharing.port()
+            shareStatus.setTag("Wi-Fi ativo · http://" + address.getHostAddress() + ":" + sharing.port()
                     + "  Código: " + sharing.pairingCode());
             handler.removeCallbacks(countdown); handler.post(countdown);
             Button stop = button("Parar compartilhamento", v -> stopSharing()); list.addView(stop);
-        } catch (Exception failure) { shareStatus.setText("Rede privada indisponível: " + failure.getMessage()); }
-    }
-    private InetAddress privateWifiAddress() throws Exception {
-        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            if (!network.isUp() || network.isLoopback()) continue;
-            for (InetAddress address : Collections.list(network.getInetAddresses()))
-                if (LocalShareServer.isPrivateWifiAddress(address.getHostAddress())) return address;
-        }
-        throw new IllegalStateException("Wi-Fi privada não encontrada");
+        } catch (Exception failure) { shareStatus.setText("Wi-Fi ativo indisponível: " + failure.getMessage()); }
     }
     private void stopSharing() { handler.removeCallbacks(countdown); if (sharing != null) sharing.close(); sharing = null; shareStatus.setText("Compartilhamento encerrado"); }
     private void confirmDelete() {

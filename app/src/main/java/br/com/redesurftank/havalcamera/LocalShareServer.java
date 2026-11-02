@@ -6,9 +6,9 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -32,11 +32,9 @@ public final class LocalShareServer implements AutoCloseable {
 
     public LocalShareServer(InetAddress wifiAddress, File filesDirectory, VideoCatalog catalog)
             throws IOException {
-        if (wifiAddress == null || !isPrivateWifiAddress(wifiAddress.getHostAddress()))
+        if (!(wifiAddress instanceof Inet4Address) || wifiAddress.isLoopbackAddress()
+                || !isPrivateWifiAddress(wifiAddress.getHostAddress()))
             throw new IllegalArgumentException("Active private Wi-Fi address required");
-        NetworkInterface network = NetworkInterface.getByInetAddress(wifiAddress);
-        if (network == null || !network.getName().toLowerCase(Locale.US).startsWith("wlan"))
-            throw new IllegalArgumentException("Address is not on active Wi-Fi");
         SecureRandom random = new SecureRandom();
         String code = String.format(Locale.US, "%06d", random.nextInt(1_000_000));
         session = new Session(filesDirectory, catalog, code, System.currentTimeMillis(), bytes -> {

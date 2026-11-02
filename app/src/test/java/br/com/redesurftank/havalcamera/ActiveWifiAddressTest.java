@@ -1,9 +1,9 @@
 package br.com.redesurftank.havalcamera;
 
+import static br.com.redesurftank.havalcamera.ActiveWifiAddress.select;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 
-import java.lang.reflect.InvocationTargetException;
 import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,17 +53,5 @@ public final class ActiveWifiAddressTest {
         InetAddress[] addresses = new InetAddress[values.length];
         for (int i = 0; i < values.length; i++) addresses[i] = InetAddress.getByName(values[i]);
         return Arrays.asList(addresses);
-    }
-
-    // Keep RED executable before the production class exists, without a production stub.
-    private static InetAddress select(boolean wifiTransport, List<InetAddress> addresses) throws Exception {
-        try {
-            return (InetAddress) Class.forName("br.com.redesurftank.havalcamera.ActiveWifiAddress")
-                    .getMethod("select", boolean.class, List.class).invoke(null, wifiTransport, addresses);
-        } catch (ClassNotFoundException missing) {
-            throw new AssertionError("Active Wi-Fi address selector is not implemented", missing);
-        } catch (InvocationTargetException failure) {
-            throw (Exception) failure.getCause();
-        }
     }
 }
