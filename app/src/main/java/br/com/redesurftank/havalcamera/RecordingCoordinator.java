@@ -80,7 +80,6 @@ public final class RecordingCoordinator implements AutoCloseable {
             catch (Exception failure) {
                 live = null;
                 closeLive(sink);
-                failures.onFailure(failure);
                 return;
             }
         }
@@ -96,7 +95,6 @@ public final class RecordingCoordinator implements AutoCloseable {
                 Sink failed = live;
                 live = null;
                 closeLive(failed);
-                failures.onFailure(failure);
             }
         }
     }
@@ -134,7 +132,6 @@ public final class RecordingCoordinator implements AutoCloseable {
                 if (live == destination) live = null;
             }
             closeLive(destination);
-            failures.onFailure(failure);
         }
     }
 
@@ -142,9 +139,7 @@ public final class RecordingCoordinator implements AutoCloseable {
         if (sink == null) return;
         try {
             sink.close();
-        } catch (Exception failure) {
-            failures.onFailure(failure);
-        }
+        } catch (Exception ignored) { }
     }
 
     @Override public synchronized void close() {

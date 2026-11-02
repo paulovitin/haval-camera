@@ -215,8 +215,12 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
             }
         } finally {
             drainScheduled.set(false);
-            if (queue.size() > 0) scheduleDrain();
+            if (queue.size() > 0 && canDrain()) scheduleDrain();
         }
+    }
+
+    private synchronized boolean canDrain() {
+        return connected && activeCredentials;
     }
 
     private void expire(long expectedGeneration) {
@@ -280,6 +284,10 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
         if (!"wss".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
                 || uri.getUserInfo() != null || uri.getFragment() != null) {
             throw new IllegalArgumentException("Live URL must be WSS without user info or fragment");
+        }
+        String query = uri.getRawQuery();
+        if (query == null || !query.matches("session=[A-Za-z0-9_-]+")) {
+            throw new IllegalArgumentException("Live URL requires only a session query");
         }
         if (session.producerToken.length() < 32 || session.producerToken.length() > 512
                 || session.url.contains(session.producerToken)) {
