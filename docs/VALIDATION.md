@@ -62,6 +62,16 @@ Na segunda rodada corretiva, o commit `5e64cacb9c2c3e81cd9693cacd1cd2885c1d444b`
 
 Esta rodada tornou atômicos, sob o lock do cliente, o snapshot de `WebSocket.queueSize()` e o enqueue local. O produtor não envia outra mensagem enquanto o transporte reporta bytes pendentes; esse transporte ocupa conservadoramente um dos 30 slots. O limite combinado permanece em no máximo 1 MiB, e transporte já no limite ou acima força recuperação e pedido de keyframe. Os limites de hardware e integração continuam inalterados.
 
+## Correção de startup do catálogo no Android 9
+
+O usuário forneceu uma reprodução no carro, Android 9, pacote 0.2, capturada em 2 de novembro de 2026 às 19h19: `ExceptionInInitializerError` em `VideoCatalog.<clinit>` causado por `PatternSyntaxException` no final de `TRIP_JSON`. O crash ocorre em `VideoCatalogProvider.onCreate`, antes da Activity. Essa evidência posterior invalida qualquer inferência de compatibilidade de startup baseada somente nos testes JVM anteriores.
+
+O commit `3a07077da19f71a7a2d8832a86dcc89b42814fed` escapa somente os delimitadores JSON literais finais de `TRIP_JSON` e `SEGMENT_JSON`; formato, grupos de captura e lógica do catálogo permanecem iguais. O commit de testes `a8a29632d71729a09f9aa1a3ff0a2f23492b6245` falhou como esperado no job `haval-camera-a8a29632d71729a0-20261102T222217Z-9862`: 126 testes, exatamente duas falhas nas novas verificações dos delimitadores. A regressão existente de recuperação também passou a verificar metadados e igualdade byte a byte do índice JSON regenerado.
+
+O job autorizado `haval-camera-3a07077da19f71a7-20261102T222305Z-16002` passou nos 126 testes JVM de 20 suítes, incluindo os 15 testes do catálogo, sem falhas, erros ou testes ignorados. Debug, release, lint vital, assinatura com certificado EcoTrip aprovado, alinhamento e integridade ZIP passaram no Mac Mini. SHA-256 do APK: `8212888f14a691c73f921a19f31fe1db122431b92731ab766bcb3384787bfa65`. Permanecem os avisos de anotações AndroidX, API obsoleta e `extractNativeLibs` no manifesto.
+
+Nenhum build local, instalação, publicação, tag ou acesso ao veículo ocorreu nesta correção. O startup após a correção ainda precisa de confirmação física no Android 9; os demais gates de hardware continuam pendentes. Revisão realizada pelo próprio implementador, sem subagentes.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
