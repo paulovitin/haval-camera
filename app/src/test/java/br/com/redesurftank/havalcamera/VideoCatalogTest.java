@@ -1,15 +1,18 @@
 package br.com.redesurftank.havalcamera;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
 import java.io.File;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -23,6 +26,21 @@ public final class VideoCatalogTest {
             new VideoCatalog.Codec("video/avc", 1760, 720, 15, 4_000_000);
 
     @Rule public final TemporaryFolder temporaryFolder = new TemporaryFolder();
+
+    // Desktop Pattern accepts these unescaped closers; Android 9 rejects them at startup.
+    @Test public void tripJsonClosingDelimitersAreExplicitLiterals() throws Exception {
+        assertTrue(catalogPattern("TRIP_JSON").endsWith("\\]\\}"));
+    }
+
+    @Test public void segmentJsonClosingDelimitersAreExplicitLiterals() throws Exception {
+        assertTrue(catalogPattern("SEGMENT_JSON").endsWith("\\}\\}"));
+    }
+
+    private static String catalogPattern(String name) throws Exception {
+        Field field = VideoCatalog.class.getDeclaredField(name);
+        field.setAccessible(true);
+        return ((Pattern) field.get(null)).pattern();
+    }
 
     @Test
     public void completedSegmentsAreOrderedAndKeepHashesAndSource() throws Exception {
@@ -165,6 +183,8 @@ public final class VideoCatalogTest {
         first.completeSegment("100",
                 new VideoCatalog.SegmentMetadata(1_000, 2_000, 1_000_000, 3, SHA_ONE, AVC));
         first.completeTrip("100", 2_000);
+        File index = new File(temporaryFolder.getRoot(), "trip-video/index.json");
+        byte[] storedIndex = Files.readAllBytes(index.toPath());
 
         VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
         recovered.recover();
@@ -173,6 +193,19 @@ public final class VideoCatalogTest {
         assertEquals(1, snapshot.size());
         assertEquals(100L, snapshot.get(0).tripId);
         assertEquals("000001.mp4", snapshot.get(0).segments.get(0).fileName);
+        assertEquals(VideoCatalog.Source.AUTOMATIC, snapshot.get(0).source);
+        assertEquals(1_000, snapshot.get(0).startMs);
+        assertEquals(Long.valueOf(2_000), snapshot.get(0).endMs);
+        VideoCatalog.Segment segment = snapshot.get(0).segments.get(0);
+        assertEquals(SHA_ONE, segment.sha256);
+        assertEquals(1_000_000, segment.durationUs);
+        assertEquals(3, segment.byteSize);
+        assertEquals("video/avc", segment.codec.mime);
+        assertEquals(1760, segment.codec.width);
+        assertEquals(720, segment.codec.height);
+        assertEquals(15, segment.codec.frameRate);
+        assertEquals(4_000_000, segment.codec.bitrate);
+        assertArrayEquals(storedIndex, Files.readAllBytes(index.toPath()));
     }
 
     @Test
