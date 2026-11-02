@@ -24,6 +24,7 @@ The camera recorder remains a separate Android application. Haval EcoTrip suppli
 - Recover after app, Shizuku, or head-unit restart without corrupting completed segments.
 - Delete oldest completed trips automatically to preserve at least 5 GB of free internal storage.
 - Show the local gallery and playback in Haval Camera.
+- Work without Haval EcoTrip for direct preview, manual recording, local gallery, playback, settings, and temporary LAN download.
 - Show the remote gallery and playback entry points in Haval Hub.
 - Provide authenticated live video with a target glass-to-glass latency of 1-2 seconds.
 - Allow resumable retrieval of recordings while the car is online.
@@ -74,6 +75,7 @@ Haval Camera owns:
 - MP4 segmentation and local retention.
 - local metadata index.
 - local gallery and player.
+- manual local recording and a temporary authenticated LAN download portal.
 - signature-protected control and metadata IPC.
 - live-video producer and recording-transfer producer.
 
@@ -152,6 +154,14 @@ Every field obeys its own setting plus a master overlay switch. Stale telemetry 
 
 The EGL compositor renders the selected overlay once, after camera color correction and before the hardware AVC input surface. Therefore local preview, MP4 segments, and live H.264 contain the same pixels. Overlay rendering must not create a second frame copy, block the encoder, or fall back to raw-frame storage.
 
+## Standalone LAN download
+
+The local gallery has a `Share on local network` action. It starts a foreground-visible, read-only server for 10 minutes only after direct user interaction. The server binds only to the active private Wi-Fi interface, never cellular, a wildcard interface, or an internet listener. Closing sharing or reaching expiry closes the socket and invalidates every session.
+
+The screen shows the private address and a random six-digit pairing code. Five failed attempts lock the session. Successful pairing issues a random 128-bit session cookie tied to the client address and expiry. The portal lists only completed catalog entries and supports bounded HTTP Range downloads for resumability. It never serves active trips, `.partial` files, arbitrary paths, settings, logs, credentials, or upload/delete actions.
+
+All request lines, headers, ranges, response sizes, concurrent clients, and idle time are bounded. Catalog IDs map to canonical files; request paths never become filesystem paths. One client and one file read are allowed at a time. LAN routing between phone and head unit is a hardware gate because some hotspot/Wi-Fi configurations isolate clients.
+
 ## Android component design
 
 ### Capture user service
@@ -181,6 +191,8 @@ The capture modes are:
 - `recording-live`: one encoder feeds both MP4 and live relay;
 
 Only one capture child and one encoder exist at a time.
+
+Haval Camera does not require Haval EcoTrip for local use. Its activity can start and stop a manual recording whose numeric ID is the start epoch and whose metadata source is `manual`. Manual recording uses the same foreground service, encoder, segmentation, retention, and recovery rules as an automatic trip. Automatic trip lifecycle, remote live, and internet retrieval remain unavailable when EcoTrip is absent.
 
 Recording transfer is an independent file-I/O state. It may run while recording because it reads only completed trips. Recording always has priority. Starting live viewing pauses an active transfer; the transfer resumes from its acknowledged offset after live viewing ends. This avoids simultaneous live and download traffic on the car's mobile uplink.
 
@@ -220,6 +232,7 @@ All cross-app commands are explicit and protected by a custom signature permissi
 - `STOP_LIVE(sessionId)`: detach relay and stop live-only capture when no viewer remains.
 - `TRANSFER(requestId, tripId, segmentIds, viewerSession)`: send completed files from requested offsets.
 - `CANCEL_TRANSFER(requestId)`: stop file reads and network transfer.
+- `START_MANUAL_RECORDING(startMs)` / `STOP_MANUAL_RECORDING(endMs)`: same-package UI actions for standalone recording. They never impersonate an EcoTrip automatic trip.
 - `TELEMETRY_SAMPLE(monotonicMs, wallClockMs, speedKmh, motorPowerKw, validity)`: update the latest overlay inputs. This high-rate ephemeral sample is freshness-checked but not entered in the replay journal.
 - `GET_SETTINGS(requestId)`: return the current settings snapshot and settings revision.
 - `UPDATE_SETTINGS(requestId, expectedRevision, patch)`: validate and atomically apply a bounded settings patch, then return the full confirmed snapshot.

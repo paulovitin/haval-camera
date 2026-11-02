@@ -26,6 +26,7 @@
 - Keep source geometry, QCarCam input, root paths, protocol limits, authentication, and signature permissions fixed; expose only safe presets and feature toggles.
 - Render optional telemetry once in the EGL path before encoding. Each displayed value has its own setting. Never label pedal braking without a confirmed vehicle signal.
 - Keep camera faults isolated from Haval EcoTrip telemetry, trips, controls, and updates.
+- Keep local preview, manual recording, gallery, playback, settings, and temporary authenticated LAN downloads fully usable without EcoTrip.
 - Haval Camera remains AGPL-3.0 and must ship source/notices; preserve the Shizuku MIT notice and add third-party notices for new dependencies.
 - Never run Android, Gradle, Kotlin, or Xcode builds on the coordinator. Use an audited Git commit on the authorized Mac Mini; do not fall back locally.
 - Before Android/iOS implementation, restore `/root/projects/haval-ecotrip` to an authorized Git repository. Before bridge implementation, restore `/opt/bridge` source to an authorized Git repository. Do not patch either production snapshot directly.
@@ -51,6 +52,7 @@
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettings.java`: validated persisted settings, revision, snapshots, and atomic patches.
 - `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayModel.java`: freshness, filtered acceleration, state classification, and field visibility.
 - `app/src/main/java/br/com/redesurftank/havalcamera/TelemetryOverlayRenderer.java`: one-pass EGL text/graphics overlay used by preview and encoder.
+- `app/src/main/java/br/com/redesurftank/havalcamera/LocalShareServer.java`: short-lived paired LAN portal for completed recording downloads.
 - `app/src/main/java/br/com/redesurftank/havalcamera/VideoCatalog.java`: trip/segment metadata and atomic index writes.
 - `app/src/main/java/br/com/redesurftank/havalcamera/RetentionPlanner.java`: pure oldest-trip deletion selection.
 - `app/src/main/java/br/com/redesurftank/havalcamera/SegmentMuxer.java`: 60-second `.partial` to MP4 lifecycle.
@@ -171,7 +173,7 @@ Assert duplicate request IDs are ignored, lower revisions are ignored after rest
 
 - [ ] **Step 2: Implement `VideoContract` and `CommandJournal`**
 
-Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence. Include freshness-checked, non-journaled `TELEMETRY_SAMPLE`, `GET_SETTINGS`, revision-checked `UPDATE_SETTINGS`, and confirmed `DELETE_COMPLETED` contracts.
+Use explicit action names under `br.com.redesurftank.havalcamera.action.*`, permission `br.com.redesurftank.havalcamera.permission.CONTROL`, protocol version 1, and SharedPreferences-backed revision/request persistence. Include same-package `START_MANUAL_RECORDING`/`STOP_MANUAL_RECORDING`, freshness-checked non-journaled `TELEMETRY_SAMPLE`, `GET_SETTINGS`, revision-checked `UPDATE_SETTINGS`, and confirmed `DELETE_COMPLETED` contracts.
 
 - [ ] **Step 3: Write failing framing tests**
 
@@ -315,8 +317,10 @@ git commit -m "feat: record hardware encoded camera segments"
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoPlaybackActivity.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettings.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettingsActivity.java`
+- Create: `app/src/main/java/br/com/redesurftank/havalcamera/LocalShareServer.java`
 - Create: `app/src/test/java/br/com/redesurftank/havalcamera/ServiceStateReducerTest.java`
 - Create: `app/src/test/java/br/com/redesurftank/havalcamera/VideoSettingsTest.java`
+- Create: `app/src/test/java/br/com/redesurftank/havalcamera/LocalShareServerTest.java`
 - Modify: `app/src/main/java/br/com/redesurftank/havalcamera/CameraActivity.java`
 - Modify: `app/src/main/AndroidManifest.xml`
 
@@ -326,7 +330,7 @@ git commit -m "feat: record hardware encoded camera segments"
 
 - [ ] **Step 1: Write failing service-state tests**
 
-Cover idle, recording, live-only, recording-live, transfer flag, 15-second viewer grace, 30-minute parked expiry, live-pauses-transfer, viewer loss preserving recording, restart reconciliation, every feature toggle, and disabled-to-enabled current-trip activation.
+Cover idle, automatic recording, manual recording without EcoTrip, live-only, recording-live, transfer flag, 15-second viewer grace, 30-minute parked expiry, live-pauses-transfer, viewer loss preserving recording, restart reconciliation, every feature toggle, and disabled-to-enabled current-trip activation.
 
 - [ ] **Step 2: Implement the pure reducer**
 
@@ -338,23 +342,27 @@ Register it as exported only behind the signature permission. Start foreground b
 
 - [ ] **Step 4: Implement provider, gallery, and playback**
 
-Provider exports metadata and content URIs read-only under a separate signature read permission. Gallery groups completed trips and active state. Player advances ordered local MP4 segments and blanks on errors.
+Provider exports metadata and content URIs read-only under a separate signature read permission. Gallery groups completed trips and active state. Player advances ordered local MP4 segments and blanks on errors. Add explicit manual start/stop controls that use numeric epoch IDs and mark metadata source `manual`.
 
 - [ ] **Step 5: Implement safe settings**
 
 Persist automatic trip recording, parked-live recording, remote live, remote downloads, quality preset, 5/10/20 GB reserve, automatic deletion, overlay master, individual date/time, speed, acceleration, drive-state, deceleration/regen switches, and four-corner position in private SharedPreferences. Add a settings activity reachable from CameraActivity. Use presets only. Require confirmation before deleting completed recordings; never delete active or transferring trips. Apply quality on the next encoder start, storage before the next segment, and feature toggles immediately.
 
-- [ ] **Step 6: Verify**
+- [ ] **Step 6: Implement temporary LAN sharing**
+
+Use a narrow `ServerSocket` HTTP/1.1 implementation with strict request/header/range bounds. Bind only to the active private Wi-Fi address after direct user action. Pair by six-digit code, issue a 128-bit address-bound cookie, expire after 10 minutes, lock after five failures, and allow one client/read. Serve an embedded listing plus Range downloads selected through canonical catalog IDs. Reject active/partial files, traversal, upload, delete, settings, wildcard/public binding, and stale sessions. Show address/code/countdown and a stop button in the local gallery.
+
+- [ ] **Step 7: Verify**
 
 Run on Mac Mini: `./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug`
 
-Expected: reducer tests pass; manifest merge shows both permissions; APK verification passes.
+Expected: reducer/settings/LAN tests pass; manifest merge shows both permissions; APK verification passes. LAN tests cover traversal, oversized input, wrong/expired code, attempt lock, cookie/client binding, Range bounds, active/partial rejection, expiry, and socket shutdown.
 
-- [ ] **Step 7: Hardware lifecycle check**
+- [ ] **Step 8: Hardware lifecycle and LAN check**
 
-Verify close/reopen, service stop, process death, Shizuku restart, app restart, and head-unit restart. Confirm completed segments survive and only `.partial` is discarded.
+Verify standalone preview/manual recording without EcoTrip, close/reopen, service stop, process death, Shizuku restart, app restart, and head-unit restart. Confirm completed segments survive and only `.partial` is discarded. Connect a phone to the same car network, pair, resume one download, verify its SHA-256, stop sharing, and confirm the port closes. Record client-isolation failures without weakening binding/authentication.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add app/src/main app/src/test docs/VALIDATION.md
