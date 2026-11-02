@@ -58,6 +58,10 @@ Na revisão corretiva da Task 8, o commit `619b94fca8f03bff6a72fce0ae66eedee4fc3
 
 As regressões adicionais cobrem rejeição de live desabilitado antes do journal, confirmação lógica do viewer, isolamento de STOP obsoleto por ID de sessão, orçamento combinado de 1 MiB entre fila local e WebSocket, recuperação após rejeição do executor, CONFIG sempre seguido de keyframe e rejeição de AVCC/NAL inválido. Nenhuma dependência mudou. Os limites de hardware e integração descritos acima continuam iguais.
 
+Na segunda rodada corretiva, o commit `5e64cacb9c2c3e81cd9693cacd1cd2885c1d444b` passou no job autorizado `haval-camera-5e64cacb9c2c3e81-20261102T213920Z-7429`. Os 124 testes JVM e todos os gates de pacote passaram. O APK release tem SHA-256 `d86321ef8c55cdf6af3c8a4f64a2f49a0ea0040fcedd270831d15e8ada811f2d`; o log tem SHA-256 `92d92e8ffca5a4437ec068666b1eb012f9393a1e5945f817b82b63378bda3324`; o snapshot imutável tem SHA-256 `aad50f6822eb2ff405836e92854225ffa07f7766c3d9b2fcfa1e3448e6b1b295`.
+
+Esta rodada tornou atômicos, sob o lock do cliente, o snapshot de `WebSocket.queueSize()` e o enqueue local. O produtor não envia outra mensagem enquanto o transporte reporta bytes pendentes; esse transporte ocupa conservadoramente um dos 30 slots. O limite combinado permanece em no máximo 1 MiB, e transporte já no limite ou acima força recuperação e pedido de keyframe. Os limites de hardware e integração continuam inalterados.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
