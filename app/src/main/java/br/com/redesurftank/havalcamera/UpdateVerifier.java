@@ -32,7 +32,10 @@ public final class UpdateVerifier {
         return inspectArchive(apk, pm::getPackageArchiveInfo);
     }
     static Archive inspectArchive(File apk, java.util.function.BiFunction<String,Integer,PackageInfo> lookup) {
-        PackageInfo info = lookup.apply(apk.getAbsolutePath(), PackageManager.GET_SIGNING_CERTIFICATES);
+        // Android 9 r1 only collects/verifies archive certificates when GET_SIGNATURES is set.
+        // Read current signers from SigningInfo; never trust the legacy rotation history.
+        PackageInfo info = lookup.apply(apk.getAbsolutePath(),
+                PackageManager.GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES);
         if (info == null || info.signingInfo == null) return null;
         Signature[] signers = info.signingInfo.getApkContentsSigners();
         if (signers == null) return null;
