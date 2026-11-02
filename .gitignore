@@ -10,3 +10,4 @@ release/
 *.raw
 *.log
 .idea/
+.worktrees/
