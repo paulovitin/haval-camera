@@ -6,9 +6,17 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
+import java.io.IOException;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.List;
+import org.junit.Assume;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -75,6 +83,52 @@ public final class LocalShareServerTest {
         LocalShareServer.Response paired = session.pair("10.0.0.2", "123456", 1_002);
         assertEquals(303, paired.status);
         assertEquals("/", paired.location);
+    }
+
+    @Test public void constructorRejectsMissingWildcardPublicLoopbackAndIpv6Bindings() throws Exception {
+        File root = folder.getRoot();
+        VideoCatalog catalog = new VideoCatalog(root);
+        assertThrows(IllegalArgumentException.class, () -> new LocalShareServer(null, root, catalog));
+        for (String address : List.of("0.0.0.0", "8.8.8.8", "127.0.0.1", "::", "::1", "fd00::1"))
+            assertThrows(IllegalArgumentException.class,
+                    () -> new LocalShareServer(InetAddress.getByName(address), root, catalog));
+    }
+
+    @Test public void bindsOnlyTheSelectedPrivateAddressRegardlessOfInterfaceName() throws Exception {
+        InetAddress address = hostPrivateIpv4();
+        Assume.assumeNotNull(address);
+        File root = folder.getRoot();
+        int port;
+        try (LocalShareServer server = new LocalShareServer(address, root, new VideoCatalog(root))) {
+            port = server.port();
+            try (Socket client = new Socket()) {
+                client.connect(new InetSocketAddress(address, port), 1_000);
+                client.setSoTimeout(2_000);
+                client.getOutputStream().write("GET / HTTP/1.1\r\nHost: camera\r\n\r\n"
+                        .getBytes(StandardCharsets.US_ASCII));
+                assertTrue(new String(client.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                        .startsWith("HTTP/1.1 200 OK\r\n"));
+            }
+            assertCannotConnect(InetAddress.getByName("127.0.0.1"), port);
+        }
+        assertCannotConnect(address, port);
+    }
+
+    private static void assertCannotConnect(InetAddress address, int port) {
+        assertThrows(IOException.class, () -> {
+            try (Socket client = new Socket()) {
+                client.connect(new InetSocketAddress(address, port), 1_000);
+            }
+        });
+    }
+
+    private static InetAddress hostPrivateIpv4() throws Exception {
+        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+            if (!network.isUp() || network.isLoopback()) continue;
+            for (InetAddress address : Collections.list(network.getInetAddresses()))
+                if (address instanceof Inet4Address && address.isSiteLocalAddress()) return address;
+        }
+        return null;
     }
 
     private LocalShareServer.Session session(long now) throws Exception {
