@@ -48,7 +48,7 @@ Ao testar outra central, registre modelo, versão Android, identificação públ
 
 ## Produtor de vídeo ao vivo
 
-Em 2 de novembro de 2026, o commit `e64fb95d2ecbd9ee` passou no job autorizado `haval-camera-e64fb95d2ecbd9ee-20261102T212402Z-20402`. A fila executou 108 testes JVM e montou os APKs debug e release. Assinatura, alinhamento, lint vital e integridade ZIP passaram. O APK release tem SHA-256 `84c479672268438bc6cb99eb025b4489b7a02d0ccc22c6e65b9304fa21358358`.
+Em 2 de novembro de 2026, o commit `b9f9bd2a6c079111` passou no job autorizado `haval-camera-b9f9bd2a6c079111-20261102T212712Z-3090`. A fila executou 110 testes JVM e montou os APKs debug e release. Assinatura, alinhamento, lint vital e integridade ZIP passaram. O APK release tem SHA-256 `afe11b88d706814fd9f600286ed7f46546d483049139d7bc052b29ca816b7f9c`.
 
 Os testes cobrem fila limitada a 1 MiB ou 30 mensagens, recuperação por keyframe, CONFIG antes do primeiro access unit, autenticação no header `Authorization: Bearer`, ausência do token na URL, WSS obrigatório, expiração sem reutilização, pedido de keyframe no formato do relay, códigos de fechamento e isolamento entre falha de rede e gravação local. OkHttp permanece em 5.4.0; nenhuma dependência de teste foi adicionada.
 
