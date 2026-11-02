@@ -37,7 +37,11 @@ public final class VideoSettingsActivity extends Activity {
         reserve = spinner(content, "Reserva livre (GB)", new String[]{"5","10","20"});
         position = spinner(content, "Posição do carimbo", new String[]{"top_left","top_right","bottom_left","bottom_right"});
         Button save = new Button(this); save.setText("Salvar"); save.setOnClickListener(v -> save()); content.addView(save);
-        ScrollView scroll = new ScrollView(this); scroll.addView(content); setContentView(scroll); load();
+        ScrollView scroll = new ScrollView(this); scroll.addView(content);
+        LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+        root.addView(ActivityNavigation.backButton(this));
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(root); load();
     }
     private void addToggle(LinearLayout content, String key, String label) {
         CheckBox box = new CheckBox(this); box.setText(label); toggles.put(key, box); content.addView(box);

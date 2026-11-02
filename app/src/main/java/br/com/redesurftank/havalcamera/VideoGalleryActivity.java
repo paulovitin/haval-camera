@@ -39,6 +39,7 @@ public final class VideoGalleryActivity extends Activity {
         Button share = button("Compartilhar na rede local", v -> startSharing());
         Button delete = button("Apagar gravações concluídas", v -> confirmDelete());
         shareStatus = new TextView(this); shareStatus.setTextColor(Color.WHITE);
+        list.addView(ActivityNavigation.backButton(this));
         list.addView(start); list.addView(stop); list.addView(share); list.addView(delete); list.addView(shareStatus);
         setContentView(list); render();
     }
@@ -53,7 +54,7 @@ public final class VideoGalleryActivity extends Activity {
         render();
     }
     private void render() {
-        while (list.getChildCount() > 5) list.removeViewAt(5);
+        while (list.getChildCount() > 6) list.removeViewAt(6);
         for (VideoCatalog.Trip trip : catalog.localSnapshot()) {
             Button row = button((trip.completed ? "Concluída " : "Em gravação ") + trip.tripId
                     + " · " + trip.segments.size() + " segmentos", v -> {
