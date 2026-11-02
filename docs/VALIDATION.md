@@ -72,6 +72,14 @@ O job autorizado `haval-camera-3a07077da19f71a7-20261102T222305Z-16002` passou n
 
 Nenhum build local, instalação, publicação, tag ou acesso ao veículo ocorreu nesta correção. O startup após a correção ainda precisa de confirmação física no Android 9; os demais gates de hardware continuam pendentes. Revisão realizada pelo próprio implementador, sem subagentes.
 
+## Gate de gravação manual após a correção Android 9
+
+O usuário confirmou independentemente o startup corrigido no Android 9: Activity estável, sem crash. Na tentativa autorizada de gravação manual por 10 segundos, o cliente OEM anunciou o primeiro frame, depois repetiu `ERR dumping qcarcam frame /data/vendor/camera/frame_0_2.raw` e `abort_test`; `CameraCaptureClient` recebeu `EOFException`. A notificação mostrou `Erro: Muxer is closed`; foram relatados três `trip.json` incompletos e nenhum MP4 ou `current.partial`. Essas são observações fornecidas pelo usuário, sem novo acesso ao veículo nesta investigação.
+
+A inspeção confirma que `camera_stream.c` rejeita modos diferentes de `w+` com `EINVAL`, mas o erro OEM fornecido não identifica o modo usado, o errno nem se a falha ocorreu em `fopen` ou na escrita. O adaptador nativo não mudou desde o baseline de captura anterior. Não foi encontrado um binário OEM local que permita verificar estaticamente essa chamada. A incompatibilidade de modo continua hipótese; falha de escrita no pipe ainda não foi descartada. A mensagem do muxer, por si só, não determina a origem da interrupção.
+
+Nenhuma correção especulativa de modo, caminho, pipe ou muxer foi aplicada. A gravação continua bloqueada para diagnóstico: é necessário obter, em sessão de hardware separadamente autorizada, o modo e o errno da abertura/escrita que falha, ou fornecer um artefato OEM offline que permita inspecionar a chamada. Nenhum teste/build novo foi executado e nenhum APK novo foi gerado nesta investigação. Os resultados de pacote da correção de startup acima continuam válidos apenas para aquele commit.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
