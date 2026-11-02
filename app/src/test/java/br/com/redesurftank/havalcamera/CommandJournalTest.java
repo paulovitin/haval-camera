@@ -138,6 +138,20 @@ public final class CommandJournalTest {
         assertEquals("high", retry.snapshot);
     }
 
+    @Test public void failedStartMetadataStagingDoesNotConsumeCommand() {
+        MemoryPreferences preferences = new MemoryPreferences();
+        CommandJournal journal = new CommandJournal(preferences);
+        preferences.failNextCommit();
+        assertThrows(IllegalStateException.class, () -> journal.applyStaged(
+                1, "start-1", VideoContract.Command.START_TRIP, "10",
+                editor -> editor.putLong("trip.start.10", 123)));
+        assertEquals(0, journal.revision());
+        assertEquals(CommandJournal.Outcome.APPLIED, journal.applyStaged(
+                1, "start-1", VideoContract.Command.START_TRIP, "10",
+                editor -> editor.putLong("trip.start.10", 123)).outcome);
+        assertEquals(123, preferences.getLong("trip.start.10", -1));
+    }
+
     @Test
     public void telemetryIsFreshnessCheckedAndNeverJournaled() {
         CommandJournal journal = new CommandJournal(new MemoryPreferences());

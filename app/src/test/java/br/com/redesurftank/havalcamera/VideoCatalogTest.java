@@ -206,6 +206,14 @@ public final class VideoCatalogTest {
         assertTrue(catalog.completedSnapshot().isEmpty());
     }
 
+    @Test public void catalogRecoversStartTimestampForReconcile() throws Exception {
+        VideoCatalog first = new VideoCatalog(temporaryFolder.getRoot());
+        first.beginTrip("987654", 123_456, VideoCatalog.Source.AUTOMATIC);
+        VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
+        recovered.recover();
+        assertEquals(123_456, recovered.tripStartMs("987654"));
+    }
+
     private void assertRejected(VideoCatalog catalog, String tripId) throws Exception {
         try {
             catalog.beginTrip(tripId, 1_000, VideoCatalog.Source.AUTOMATIC);

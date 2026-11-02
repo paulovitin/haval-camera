@@ -135,4 +135,33 @@ public final class ServiceStateReducerTest {
         assertEquals("codec", reducer.state().error);
         assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
     }
+
+    @Test public void disablingRemoteLiveStopsParkedRecording() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.settings(1, true, true, true, true, null));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 100_000));
+        java.util.List<ServiceStateReducer.Effect> effects = reducer.apply(
+                ServiceStateReducer.Event.settings(3, true, true, false, true, null));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+        assertFalse(reducer.state().parkedRecording);
+        assertTrue(effects.stream().anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.STOP_RECORDING));
+    }
+
+    @Test public void suppliedStopTimesReachFinalizationEffects() {
+        ServiceStateReducer automatic = new ServiceStateReducer();
+        automatic.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        ServiceStateReducer.Effect automaticEnd = automatic.apply(
+                ServiceStateReducer.Event.stopAutomatic("10", 9_999, 2)).stream()
+                .filter(effect -> effect.type == ServiceStateReducer.EffectType.FINALIZE_TRIP)
+                .findFirst().orElseThrow();
+        assertEquals(9_999, automaticEnd.endMs);
+
+        ServiceStateReducer manual = new ServiceStateReducer();
+        manual.apply(ServiceStateReducer.Event.startManual("20", 1));
+        ServiceStateReducer.Effect manualEnd = manual.apply(
+                ServiceStateReducer.Event.stopManual(8_888, 2)).stream()
+                .filter(effect -> effect.type == ServiceStateReducer.EffectType.STOP_RECORDING)
+                .findFirst().orElseThrow();
+        assertEquals(8_888, manualEnd.endMs);
+    }
 }
