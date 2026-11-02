@@ -82,6 +82,18 @@ Nenhuma correção especulativa de modo, caminho, pipe ou muxer foi aplicada. A 
 
 ## Ciclo foreground, galeria e compartilhamento local
 
+### Task 1: seleção do Wi-Fi ativo
+
+O commit de testes `5f4f93ac40dced1a31530baeb528aaf9fa750504` foi verificado primeiro no job `haval-camera-5f4f93ac40dced1a-20261102T224352Z-14036`: 136 testes, exatamente nove falhas novas, nenhum erro ou teste ignorado. Oito falhas demonstraram a ausência do seletor; a nona reproduziu a rejeição indevida pelo prefixo do nome da interface. Os 126 testes anteriores e a nova rejeição de bindings inválidos passaram.
+
+O commit `79fe2b5e47a9787b9e879a9e2042c07942737390` passou no job `haval-camera-79fe2b5e47a9787b-20261102T224536Z-23926`: 136 testes JVM em 21 suítes, zero falhas, erros ou testes ignorados. Os oito testes de seleção cobrem IPv4 privado, ordem dos candidatos e rejeição de transporte não Wi-Fi, loopback, IPv6, endereços públicos e lista vazia. O teste com socket real confirmou o atendimento no endereço privado selecionado sem exigir prefixo de interface, a recusa de conexão pelo loopback na mesma porta e o fechamento da porta após encerrar o servidor.
+
+A fila montou debug com Java/AIDL e native ARM64, e release com lint vital, assinatura fixada, alinhamento e integridade ZIP. SHA-256 do APK release: `e8718da41b3a5248af5e0f4544daa261b87d9000430193d7de7d510d28f37110`. As permissões normais `ACCESS_NETWORK_STATE` e `INTERNET` foram adicionadas para a consulta Android e o socket. Nenhuma dependência ou controle de build foi alterado.
+
+Esta evidência não valida a execução de `ConnectivityManager` ou a apresentação da Activity no Android 9 físico. Wi-Fi Starlink Mini, central e telefone na mesma rede, isolamento de clientes, troca/perda de rede e download real continuam pendentes. A seleção é consultada ao iniciar/reiniciar o compartilhamento; não foi adicionado observador de mudanças de rede nem rebinding automático. Nenhum build/SDK local, teste de UI, instalação ou publicação foi executado; revisão feita pelo próprio implementador, sem subagentes. Os avisos já conhecidos de anotações AndroidX, API obsoleta e `extractNativeLibs` permanecem. O defeito separado `Muxer is closed` não foi alterado.
+
+### Evidência anterior do ciclo local
+
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
 
 Esta evidência é somente de software. Não foram executados o Step 8 nem os Gates de hardware: gravação standalone no carro, morte de processo, reinício do Shizuku/central, reprodução real dos segmentos, roteamento Wi-Fi entre telefone e central, retomada e SHA-256 de download, fechamento físico da porta, AVM OEM, carga ou temperatura. O APK não deve ser publicado como compatível até esses testes passarem.
