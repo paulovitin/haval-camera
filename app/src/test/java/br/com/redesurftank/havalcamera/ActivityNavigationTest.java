@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
@@ -18,11 +20,28 @@ import org.junit.Test;
 public final class ActivityNavigationTest {
     @Test public void compiledScreenLayoutsInstallTheBackButton() throws Exception {
         String wrapper = methodCode(disassemble(BackNavigationActivity.class), "setContentView(");
-        int button = wrapper.indexOf("ActivityNavigation.backButton:");
-        int insertion = wrapper.indexOf("LinearLayout.addView:", button);
-        assertTrue("wrapper must create the Back button", button >= 0);
-        assertTrue("wrapper must insert it", insertion > button);
-        assertTrue("wrapper must install the layout", wrapper.contains("Activity.setContentView:"));
+        List<String> code = instructions(wrapper);
+        int button = instructionIndex(code, "ActivityNavigation.backButton:", 0);
+        int firstInsertion = instructionIndex(code, "LinearLayout.addView:", 0);
+        int secondInsertion = instructionIndex(code, "LinearLayout.addView:", firstInsertion + 1);
+        assertTrue("wrapper must create the Back button", button >= 2);
+        assertTrue("Back button must feed the first addView", firstInsertion > button);
+        assertEquals("aload_2", opcode(code.get(button - 2))); // root
+        assertEquals("aload_0", opcode(code.get(button - 1))); // Activity
+        for (String line : code.subList(button + 1, firstInsertion)) {
+            String operation = opcode(line);
+            assertTrue("Back return value must stay on the stack: " + line,
+                    Arrays.asList("new", "dup", "iconst_m1", "bipush", "sipush", "invokespecial")
+                            .contains(operation));
+            if (operation.equals("new") || operation.equals("invokespecial"))
+                assertTrue(line, line.contains("LinearLayout$LayoutParams"));
+        }
+        assertTrue(code.get(firstInsertion).contains("addView:(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V"));
+        assertTrue("content must be added after Back", secondInsertion > firstInsertion);
+        assertEquals("aload_2", opcode(code.get(firstInsertion + 1)));
+        assertEquals("aload_1", opcode(code.get(firstInsertion + 2)));
+        assertTrue("wrapper must install the layout",
+                instructionIndex(code, "Activity.setContentView:", secondInsertion + 1) > secondInsertion);
         for (Class<?> screen : new Class<?>[]{CameraActivity.class, VideoGalleryActivity.class,
                 VideoPlaybackActivity.class, VideoSettingsActivity.class}) {
             assertTrue(screen.getSimpleName(), methodCode(disassemble(screen), "onCreate(")
@@ -37,6 +56,13 @@ public final class ActivityNavigationTest {
         String adapter = methodCode(bytecode, "lambda$backButton$");
         assertTrue(adapter.contains("Button.setText:"));
         assertTrue(adapter.contains("Button.setOnClickListener:"));
+        assertEquals("one click listener is installed", 1,
+                bytecode.lines().filter(line -> line.contains("Button.setOnClickListener:")).count());
+        List<String> adapterCode = instructions(adapter);
+        int setter = instructionIndex(adapterCode, "Button.setOnClickListener:", 0);
+        assertTrue("configured listener must reach the Button", setter >= 2);
+        assertEquals("aload_0", opcode(adapterCode.get(setter - 2))); // Button
+        assertEquals("aload_2", opcode(adapterCode.get(setter - 1))); // configured click
         String configuration = methodCode(bytecode, "configureBack(");
         assertTrue(configuration.contains("String Voltar"));
         assertTrue(configuration.contains("backClick:"));
@@ -75,6 +101,23 @@ public final class ActivityNavigationTest {
         assertTrue(signatureStart, start >= 0);
         int end = disassembly.indexOf("\n\n", start);
         return disassembly.substring(start, end < 0 ? disassembly.length() : end);
+    }
+
+    private static List<String> instructions(String method) {
+        List<String> code = new ArrayList<>();
+        for (String line : method.split("\\n"))
+            if (line.matches("\\s*\\d+:.*")) code.add(line.trim());
+        return code;
+    }
+
+    private static int instructionIndex(List<String> code, String target, int start) {
+        for (int i = start; i < code.size(); i++)
+            if (code.get(i).contains(target)) return i;
+        return -1;
+    }
+
+    private static String opcode(String instruction) {
+        return instruction.replaceFirst("^\\d+:\\s*", "").split("\\s+", 2)[0];
     }
 
     @Test public void sharedContentViewInstallationIsFinal() {

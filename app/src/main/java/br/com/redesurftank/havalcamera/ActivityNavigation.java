@@ -14,6 +14,7 @@ public final class ActivityNavigation {
             button.setText(label);
             button.setOnClickListener(click);
         });
+        button.setOnClickListener(view -> activity.recreate());
         return button;
     }
 
