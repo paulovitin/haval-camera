@@ -45,3 +45,9 @@ A compilação emitiu os sete avisos já conhecidos de anotações AndroidX e AP
 ## Acrescentar evidência
 
 Ao testar outra central, registre modelo, versão Android, identificação pública do firmware, versão do Shizuku e modo de execução, commit/versão do APK, duração observada e resultado de cada verificação. Remova VIN, endereços de rede, credenciais e imagens pessoais antes de compartilhar diagnósticos. Marque como pendente qualquer cenário que não tenha sido executado.
+
+## Ciclo foreground, galeria e compartilhamento local
+
+Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
+
+Esta evidência é somente de software. Não foram executados o Step 8 nem os Gates de hardware: gravação standalone no carro, morte de processo, reinício do Shizuku/central, reprodução real dos segmentos, roteamento Wi-Fi entre telefone e central, retomada e SHA-256 de download, fechamento físico da porta, AVM OEM, carga ou temperatura. O APK não deve ser publicado como compatível até esses testes passarem.

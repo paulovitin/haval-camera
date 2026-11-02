@@ -23,6 +23,8 @@ public final class TripVideoService extends Service {
     private static final String CHANNEL = "trip-video";
     private static final int NOTIFICATION = 41;
     private static final String PREFERENCES = "trip-video-journal";
+    private static final String ACTIVE_ID = "service.activeTripId";
+    private static final String ACTIVE_MANUAL = "service.activeManual";
     private final ServiceStateReducer reducer = new ServiceStateReducer();
     private final TelemetryOverlayModel telemetry = new TelemetryOverlayModel();
     private VideoCatalog catalog;
@@ -47,15 +49,19 @@ public final class TripVideoService extends Service {
         createChannel();
         startForeground(NOTIFICATION, notification("Câmera pronta"));
         try {
-            catalog = new VideoCatalog(getFilesDir());
-            catalog.recover();
+            catalog = VideoCatalog.shared(getFilesDir());
             settings = VideoSettings.from(this);
             journal = new CommandJournal(getSharedPreferences(PREFERENCES, MODE_PRIVATE));
             capture = new CameraCaptureClient(this, (state, detail) -> {
                 if (state == CameraCaptureClient.State.ERROR) fail(detail);
             });
-            String recovered = journal.activeTripId();
-            if (recovered != null) apply(ServiceStateReducer.Event.startAutomatic(recovered, nextSequence()));
+            String recovered = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+                    .getString(ACTIVE_ID, journal.activeTripId());
+            boolean recoveredManual = getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+                    .getBoolean(ACTIVE_MANUAL, false);
+            if (recovered != null) apply(recoveredManual
+                    ? ServiceStateReducer.Event.startManual(recovered, nextSequence())
+                    : ServiceStateReducer.Event.startAutomatic(recovered, nextSequence()));
             main.postDelayed(tick, 1_000);
         } catch (Exception failure) {
             fail(failure.getMessage());
@@ -148,6 +154,7 @@ public final class TripVideoService extends Service {
                 if (activeTripId != null && activeTripId.equals(effect.tripId)) {
                     catalog.completeTrip(activeTripId, System.currentTimeMillis());
                     activeTripId = null;
+                    clearPersistedRecording();
                 }
                 break;
             case START_CAPTURE:
@@ -185,6 +192,10 @@ public final class TripVideoService extends Service {
         }, fps, bitrate);
         coordinator = new RecordingCoordinator(output, capture::stop, encoder, this::pipelineFailure);
         activeTripId = tripId;
+        if (!getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+                .putString(ACTIVE_ID, tripId).putBoolean(ACTIVE_MANUAL, manual).commit()) {
+            throw new IllegalStateException("Could not persist active recording");
+        }
         encoder.start();
         long origin = System.nanoTime();
         capture.start(frame -> {
@@ -216,6 +227,7 @@ public final class TripVideoService extends Service {
         stopPipeline();
         if (discard) catalog.discardTrip(tripId); else catalog.completeTrip(tripId, endMs);
         activeTripId = null;
+        clearPersistedRecording();
         apply(ServiceStateReducer.Event.stopRecording(nextSequence()));
     }
 
@@ -226,6 +238,13 @@ public final class TripVideoService extends Service {
         RecordingCoordinator oldCoordinator = coordinator; coordinator = null;
         if (oldCoordinator != null) oldCoordinator.close();
         muxer = null;
+    }
+
+    private void clearPersistedRecording() {
+        if (!getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit()
+                .remove(ACTIVE_ID).remove(ACTIVE_MANUAL).commit()) {
+            throw new IllegalStateException("Could not clear active recording");
+        }
     }
 
     private void acceptTelemetry(Intent intent) {

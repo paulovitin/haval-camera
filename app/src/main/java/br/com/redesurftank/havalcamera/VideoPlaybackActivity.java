@@ -20,7 +20,7 @@ public final class VideoPlaybackActivity extends Activity implements SurfaceHold
         FrameLayout root = new FrameLayout(this); root.setBackgroundColor(Color.BLACK);
         surface = new SurfaceView(this); root.addView(surface, new FrameLayout.LayoutParams(-1,-1));
         error = new TextView(this); error.setTextColor(Color.WHITE); root.addView(error); setContentView(root);
-        try { catalog = new VideoCatalog(getFilesDir()); catalog.recover();
+        try { catalog = VideoCatalog.shared(getFilesDir());
             segments = catalog.completedSnapshot().stream().filter(t -> Long.toString(t.tripId).equals(tripId)).findFirst().orElseThrow().segments;
             surface.getHolder().addCallback(this);
         } catch (Exception failure) { fail("Gravação indisponível"); }

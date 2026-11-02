@@ -209,12 +209,13 @@ public final class ServiceStateReducer {
         boolean newLive = next.mode == Mode.LIVE_ONLY || next.mode == Mode.RECORDING_LIVE;
         if (oldRecording && (!newRecording || !old.tripId.equals(next.tripId)))
             result.add(new Effect(EffectType.STOP_RECORDING, old.tripId));
-        if (!oldRecording && (newRecording || newLive)) result.add(new Effect(EffectType.START_CAPTURE, null));
-        if (!oldLive && newLive && oldRecording) result.add(new Effect(EffectType.ATTACH_LIVE, null));
-        if (oldLive && !newLive) result.add(new Effect(EffectType.DETACH_LIVE, null));
-        if (!oldRecording && newRecording) result.add(new Effect(EffectType.START_RECORDING, next.tripId));
-        if (oldRecording && newRecording && !old.tripId.equals(next.tripId))
+        if ((!oldRecording && newRecording)
+                || (oldRecording && newRecording && !old.tripId.equals(next.tripId)))
             result.add(new Effect(EffectType.START_RECORDING, next.tripId));
+        if (!newRecording && newLive && (!oldLive || oldRecording))
+            result.add(new Effect(EffectType.START_CAPTURE, null));
+        if (!oldLive && newLive) result.add(new Effect(EffectType.ATTACH_LIVE, null));
+        if (oldLive && !newLive) result.add(new Effect(EffectType.DETACH_LIVE, null));
         if ((oldRecording || oldLive) && !newRecording && !newLive)
             result.add(new Effect(EffectType.STOP_CAPTURE, null));
         if (!old.transferPaused && next.transferPaused) result.add(new Effect(EffectType.PAUSE_TRANSFER, null));

@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -20,10 +21,19 @@ public final class VideoGalleryActivity extends Activity {
     private VideoCatalog catalog;
     private LocalShareServer sharing;
     private TextView shareStatus;
+    private final Handler handler = new Handler();
+    private final Runnable countdown = new Runnable() {
+        @Override public void run() {
+            if (sharing == null) return;
+            long seconds = Math.max(0, (sharing.expiresAtMs() - System.currentTimeMillis()) / 1_000);
+            shareStatus.setText(shareStatus.getTag() + "  Restam " + seconds + " s");
+            if (seconds == 0) stopSharing(); else handler.postDelayed(this, 1_000);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        try { catalog = new VideoCatalog(getFilesDir()); catalog.recover(); }
+        try { catalog = VideoCatalog.shared(getFilesDir()); }
         catch (Exception failure) { finish(); return; }
         list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(24,24,24,24);
         Button start = button("Iniciar gravação manual", v -> command(VideoContract.ACTION_START_MANUAL_RECORDING));
@@ -60,8 +70,9 @@ public final class VideoGalleryActivity extends Activity {
             if (sharing != null) sharing.close();
             InetAddress address = privateWifiAddress();
             sharing = new LocalShareServer(address, getFilesDir(), catalog);
-            shareStatus.setText("http://" + address.getHostAddress() + ":" + sharing.port()
-                    + "  Código: " + sharing.pairingCode() + "  Válido por 10 min");
+            shareStatus.setTag("http://" + address.getHostAddress() + ":" + sharing.port()
+                    + "  Código: " + sharing.pairingCode());
+            handler.removeCallbacks(countdown); handler.post(countdown);
             Button stop = button("Parar compartilhamento", v -> stopSharing()); list.addView(stop);
         } catch (Exception failure) { shareStatus.setText("Rede privada indisponível: " + failure.getMessage()); }
     }
@@ -73,7 +84,7 @@ public final class VideoGalleryActivity extends Activity {
         }
         throw new IllegalStateException("Wi-Fi privada não encontrada");
     }
-    private void stopSharing() { if (sharing != null) sharing.close(); sharing = null; shareStatus.setText("Compartilhamento encerrado"); }
+    private void stopSharing() { handler.removeCallbacks(countdown); if (sharing != null) sharing.close(); sharing = null; shareStatus.setText("Compartilhamento encerrado"); }
     private void confirmDelete() {
         new AlertDialog.Builder(this).setTitle("Apagar gravações concluídas?")
                 .setMessage("Gravações ativas não serão apagadas.").setNegativeButton("Cancelar", null)

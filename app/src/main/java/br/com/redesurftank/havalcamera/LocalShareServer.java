@@ -8,8 +8,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.List;
@@ -30,6 +32,9 @@ public final class LocalShareServer implements AutoCloseable {
             throws IOException {
         if (wifiAddress == null || !isPrivateWifiAddress(wifiAddress.getHostAddress()))
             throw new IllegalArgumentException("Active private Wi-Fi address required");
+        NetworkInterface network = NetworkInterface.getByInetAddress(wifiAddress);
+        if (network == null || !network.getName().toLowerCase(Locale.US).startsWith("wlan"))
+            throw new IllegalArgumentException("Address is not on active Wi-Fi");
         SecureRandom random = new SecureRandom();
         String code = String.format(Locale.US, "%06d", random.nextInt(1_000_000));
         session = new Session(filesDirectory, catalog, code, System.currentTimeMillis(), bytes -> {
@@ -38,6 +43,7 @@ public final class LocalShareServer implements AutoCloseable {
         socket = new ServerSocket();
         socket.setReuseAddress(false);
         socket.bind(new InetSocketAddress(wifiAddress, 0), 1);
+        socket.setSoTimeout(1_000);
         worker = new Thread(this::acceptLoop, "CameraLocalShare");
         worker.start();
     }
@@ -53,6 +59,8 @@ public final class LocalShareServer implements AutoCloseable {
                 Response response = handle(readBounded(client.getInputStream()),
                         client.getInetAddress().getHostAddress(), System.currentTimeMillis());
                 write(client.getOutputStream(), response);
+            } catch (SocketTimeoutException timeout) {
+                if (System.currentTimeMillis() >= session.expiresAtMs) close();
             } catch (IOException failure) {
                 if (!session.isClosed()) close();
             }

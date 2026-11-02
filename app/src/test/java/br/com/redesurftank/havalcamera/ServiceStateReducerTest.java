@@ -79,4 +79,14 @@ public final class ServiceStateReducerTest {
         assertTrue(reducer.state().manualRecording);
         assertEquals("1700000000000", reducer.state().tripId);
     }
+
+    @Test public void stoppingRecordingKeepsLiveOnlyCaptureRunning() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 1_000));
+        java.util.List<ServiceStateReducer.Effect> effects =
+                reducer.apply(ServiceStateReducer.Event.stopRecording(3));
+        assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
+        assertTrue(effects.stream().anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.START_CAPTURE));
+    }
 }

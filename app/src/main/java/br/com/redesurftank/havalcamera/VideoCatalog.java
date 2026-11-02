@@ -22,6 +22,7 @@ import java.util.stream.Stream;
 
 /** Crash-safe metadata and file layout for local automatic and manual trip recordings. */
 public final class VideoCatalog {
+    private static VideoCatalog shared;
     private static final Pattern NUMERIC_ID = Pattern.compile("[0-9]+");
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-fA-F]{64}");
     private static final Pattern MIME = Pattern.compile("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+");
@@ -49,6 +50,15 @@ public final class VideoCatalog {
         root = new File(canonicalFiles, "trip-video").getCanonicalFile();
         if (!canonicalFiles.equals(root.getParentFile())) throw new IOException("Unsafe catalog root");
         Files.createDirectories(root.toPath());
+    }
+
+    /** One process-wide owner prevents recovery from racing an active muxer. */
+    public static synchronized VideoCatalog shared(File filesDirectory) throws IOException {
+        if (shared == null) {
+            shared = new VideoCatalog(filesDirectory);
+            shared.recover();
+        }
+        return shared;
     }
 
     public synchronized void beginTrip(String tripId, long startMs, Source source) throws IOException {

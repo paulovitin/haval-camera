@@ -29,8 +29,7 @@ public final class VideoCatalogProvider extends ContentProvider {
 
     @Override public boolean onCreate() {
         try {
-            catalog = new VideoCatalog(getContext().getFilesDir());
-            catalog.recover();
+            catalog = VideoCatalog.shared(getContext().getFilesDir());
             settings = VideoSettings.from(getContext());
             journal = new CommandJournal(getContext().getSharedPreferences("trip-video-journal", 0));
             return true;
