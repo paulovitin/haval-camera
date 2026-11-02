@@ -54,6 +54,10 @@ Os testes cobrem fila limitada a 1 MiB ou 30 mensagens, recuperação por keyfra
 
 Esta evidência é somente de software. Não houve instalação, publicação ou teste de rede no carro. WSS real, MQTT/IPC instalado, frames do encoder físico, perda e retorno de 4G, latência, gravação simultânea, grace period de 15 segundos, AVM OEM, carga e temperatura permanecem pendentes nos gates de hardware.
 
+Na revisão corretiva da Task 8, o commit `619b94fca8f03bff6a72fce0ae66eedee4fc3be3` passou no job autorizado `haval-camera-619b94fca8f03bff-20261102T213410Z-15803`. Os 120 testes JVM e os mesmos gates de debug, release, lint vital, assinatura, alinhamento e integridade ZIP passaram. O APK release tem SHA-256 `f5c78c247403591f3b0460bdb327975f8fdc1967cade2e88bd38ba5bc8c2df98`; o log tem SHA-256 `a0a04ab41f10dff6d9d9def6e9f1bffb6d4fab4e8ef1ead02f63cadc430961f0`; o snapshot imutável enviado tem SHA-256 `c7f69cdb90f58d1377e9e81a9a56afa623d013d1de600e919b26650cd9db91a4`.
+
+As regressões adicionais cobrem rejeição de live desabilitado antes do journal, confirmação lógica do viewer, isolamento de STOP obsoleto por ID de sessão, orçamento combinado de 1 MiB entre fila local e WebSocket, recuperação após rejeição do executor, CONFIG sempre seguido de keyframe e rejeição de AVCC/NAL inválido. Nenhuma dependência mudou. Os limites de hardware e integração descritos acima continuam iguais.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
