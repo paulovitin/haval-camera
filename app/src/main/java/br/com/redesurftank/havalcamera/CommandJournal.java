@@ -96,7 +96,8 @@ public final class CommandJournal {
         Set<String> nextRequestIds = new HashSet<>(requestIds);
         nextRequestIds.add(requestId);
         persistCommands(incomingRevision, nextReconcileRevision,
-                nextActiveTripId, nextLastTripId, nextRequestIds, staging);
+                nextActiveTripId, nextLastTripId, nextRequestIds,
+                outcome == Outcome.APPLIED ? staging : editor -> { });
         revision = incomingRevision;
         hasRevision = true;
         reconcileRevision = nextReconcileRevision;
