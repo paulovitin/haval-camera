@@ -12,7 +12,8 @@ public final class RetentionPlannerTest {
     private static final long GB = 1_000_000_000L;
 
     @Test
-    public void selectedFiveTenAndTwentyGbReservesAreAppliedExactly() {
+    public void selectedOneFiveTenAndTwentyGbReservesAreAppliedExactly() {
+        assertReserve(1 * GB);
         assertReserve(5 * GB);
         assertReserve(10 * GB);
         assertReserve(20 * GB);

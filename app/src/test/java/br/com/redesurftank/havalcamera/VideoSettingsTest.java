@@ -17,12 +17,38 @@ public final class VideoSettingsTest {
         assertTrue(value.remoteLive);
         assertTrue(value.remoteDownloads);
         assertEquals(VideoSettings.Quality.STANDARD, value.quality);
-        assertEquals(5L << 30, value.reserveBytes);
         assertTrue(value.automaticDeletion);
         assertTrue(value.overlayMaster && value.overlayDateTime && value.overlaySpeed
                 && value.overlayAcceleration && value.overlayDriveState
                 && value.overlayDecelerationRegen);
         assertEquals(VideoSettings.OverlayPosition.BOTTOM_LEFT, value.overlayPosition);
+    }
+
+    @Test public void defaultsToOneGiBReserve() {
+        VideoSettings settings = new VideoSettings(new VideoSettings.MemoryStore());
+
+        assertEquals(1L << 30, settings.snapshot().reserveBytes);
+    }
+
+    @Test public void acceptsOneFiveTenAndTwentyGiBReserves() {
+        int[] reserveGb = {1, 5, 10, 20};
+        long[] expectedBytes = {1L << 30, 5L << 30, 10L << 30, 20L << 30};
+        VideoSettings.MemoryStore store = new VideoSettings.MemoryStore();
+        VideoSettings settings = new VideoSettings(store);
+
+        for (int index = 0; index < reserveGb.length; index++) {
+            settings.applyPatch(Map.of("reserveGb", reserveGb[index]));
+            assertEquals(expectedBytes[index], new VideoSettings(store).snapshot().reserveBytes);
+        }
+    }
+
+    @Test public void rejectsUnsupportedReserve() {
+        VideoSettings settings = new VideoSettings(new VideoSettings.MemoryStore());
+        VideoSettings.Snapshot before = settings.snapshot();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> settings.applyPatch(Map.of("reserveGb", 2)));
+        assertEquals(before, settings.snapshot());
     }
 
     @Test public void validatedPatchPersistsAtomically() {
@@ -43,8 +69,6 @@ public final class VideoSettingsTest {
         VideoSettings.Snapshot before = settings.snapshot();
         assertThrows(IllegalArgumentException.class,
                 () -> settings.applyPatch(Map.of("quality", "custom")));
-        assertThrows(IllegalArgumentException.class,
-                () -> settings.applyPatch(Map.of("reserveGb", 1)));
         assertThrows(IllegalArgumentException.class,
                 () -> settings.applyPatch(Map.of("unknown", true)));
         assertEquals(before, settings.snapshot());

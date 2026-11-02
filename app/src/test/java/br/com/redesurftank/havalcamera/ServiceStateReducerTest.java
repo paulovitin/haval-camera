@@ -136,6 +136,16 @@ public final class ServiceStateReducerTest {
         assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
     }
 
+    @Test public void firstPipelineFailureRemainsVisible() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.pipelineFailed(
+                1, "Reserva de armazenamento indisponível"));
+
+        reducer.apply(ServiceStateReducer.Event.pipelineFailed(2, "Muxer is closed"));
+
+        assertEquals("Reserva de armazenamento indisponível", reducer.state().error);
+    }
+
     @Test public void disablingRemoteLiveStopsParkedRecording() {
         ServiceStateReducer reducer = new ServiceStateReducer();
         reducer.apply(ServiceStateReducer.Event.settings(1, true, true, true, true, null));
