@@ -55,7 +55,10 @@ public final class VideoCatalog {
         if (startMs < 0 || source == null) throw new IllegalArgumentException("Invalid trip metadata");
         MutableTrip existing = trips.get(id);
         if (existing != null) {
-            if (!existing.completed && existing.startMs == startMs && existing.source == source) return;
+            if (!existing.completed && existing.startMs == startMs && existing.source == source) {
+                writeIndex();
+                return;
+            }
             throw new IllegalStateException("Trip already exists: " + id);
         }
         File directory = tripDirectory(id);
@@ -64,11 +67,11 @@ public final class VideoCatalog {
         trips.put(id, trip);
         try {
             writeTrip(trip);
-            writeIndex();
         } catch (IOException failure) {
             trips.remove(id);
             throw failure;
         }
+        writeIndex();
     }
 
     public synchronized Segment completeSegment(String tripId, SegmentMetadata metadata)
@@ -93,11 +96,11 @@ public final class VideoCatalog {
         trip.segments.add(segment);
         try {
             writeTrip(trip);
-            writeIndex();
         } catch (IOException failure) {
             trip.segments.remove(trip.segments.size() - 1);
             throw failure;
         }
+        writeIndex();
         return segment;
     }
 
@@ -112,12 +115,12 @@ public final class VideoCatalog {
         trip.endMs = endMs;
         try {
             writeTrip(trip);
-            writeIndex();
         } catch (IOException failure) {
             trip.completed = false;
             trip.endMs = null;
             throw failure;
         }
+        writeIndex();
     }
 
     public synchronized void discardTrip(String tripId) throws IOException {
