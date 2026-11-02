@@ -124,6 +124,19 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void malformedCodecConfigEndsOnlyTheLiveSession() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.client.start(fixture.session("a".repeat(32)));
+        fixture.factory.open(0);
+
+        fixture.client.onCodecConfig(bytes(0, 0, 0, 1), bytes(0, 0, 0, 1, 0x68));
+        await(() -> !fixture.client.hasActiveCredentials());
+
+        assertEquals(VideoRelayClient.Status.PROTOCOL_ERROR,
+                fixture.statuses.get(fixture.statuses.size() - 1));
+        fixture.client.close();
+    }
+
     @Test public void alreadyExpiredCredentialsFailWithoutOpeningOrRetrying() {
         Fixture fixture = new Fixture();
 
