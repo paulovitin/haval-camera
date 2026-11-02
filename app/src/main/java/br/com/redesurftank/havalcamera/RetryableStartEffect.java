@@ -1,5 +1,7 @@
 package br.com.redesurftank.havalcamera;
 
+import java.util.List;
+
 /** Restores retryable reducer state when a synchronous recording start effect fails. */
 final class RetryableStartEffect {
     interface Executor {
@@ -8,9 +10,13 @@ final class RetryableStartEffect {
 
     static void apply(ServiceStateReducer reducer, ServiceStateReducer.Event event,
             long failureSequence, Executor executor) throws Exception {
+        List<ServiceStateReducer.Effect> effects = reducer.apply(event);
+        boolean startsRecording = effects.stream()
+                .anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.START_RECORDING);
         try {
-            for (ServiceStateReducer.Effect effect : reducer.apply(event)) executor.execute(effect);
+            for (ServiceStateReducer.Effect effect : effects) executor.execute(effect);
         } catch (Exception failure) {
+            if (!startsRecording) throw failure;
             for (ServiceStateReducer.Effect cleanup : reducer.apply(
                     ServiceStateReducer.Event.pipelineFailed(failureSequence, failure.getMessage()))) {
                 try { executor.execute(cleanup); }

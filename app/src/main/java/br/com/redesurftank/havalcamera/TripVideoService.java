@@ -140,7 +140,7 @@ public final class TripVideoService extends Service {
                 if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
                     apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
                 }
-                applyRetryableStart(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
+                apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
                 break;
             case RECONCILE:
                 if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
@@ -148,7 +148,7 @@ public final class TripVideoService extends Service {
                 }
                 if (tripId == null) break;
                 recoverReconcileStart(intent, tripId);
-                applyRetryableStart(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
+                apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
                 break;
             case STOP_TRIP:
                 apply(ServiceStateReducer.Event.stopAutomatic(tripId, suppliedEndMs, nextSequence()));
@@ -201,11 +201,6 @@ public final class TripVideoService extends Service {
     private long nextSequence() { return ++sequence; }
 
     private void apply(ServiceStateReducer.Event event) throws Exception {
-        for (ServiceStateReducer.Effect effect : reducer.apply(event)) execute(effect);
-        updateNotification();
-    }
-
-    private void applyRetryableStart(ServiceStateReducer.Event event) throws Exception {
         RetryableStartEffect.apply(reducer, event, nextSequence(), this::execute);
         updateNotification();
     }
