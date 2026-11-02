@@ -10,8 +10,10 @@ public final class ActivityNavigation {
 
     public static Button backButton(Activity activity) {
         Button button = new Button(activity);
-        button.setText("Voltar");
-        button.setOnClickListener(view -> activity.recreate());
+        configureBack(activity::finish, (label, click) -> {
+            button.setText(label);
+            button.setOnClickListener(click);
+        });
         return button;
     }
 
