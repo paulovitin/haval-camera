@@ -40,14 +40,13 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     private final FloatBuffer quad = ByteBuffer.allocateDirect(16 * 4)
             .order(ByteOrder.nativeOrder()).asFloatBuffer();
     private final TelemetryOverlayRenderer overlay = new TelemetryOverlayRenderer();
+    private final EncoderLifecycle lifecycle = new EncoderLifecycle();
     private MediaCodec codec;
     private Surface inputSurface;
     private Thread renderThread;
     private Thread drainThread;
     private boolean framePending;
     private long pendingPtsUs;
-    private volatile boolean running;
-    private volatile boolean drainRunning;
     private volatile boolean failureReported;
 
     public EglFrameEncoder(Listener listener) {
@@ -56,7 +55,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     }
 
     public synchronized String start() throws Exception {
-        if (running) throw new IllegalStateException("Encoder already started");
+        if (codec != null) throw new IllegalStateException("Encoder already started");
         Exception lastFailure = null;
         for (MediaCodecInfo info : hardwareSurfaceEncoders()) {
             MediaCodec candidate = null;
@@ -76,8 +75,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
                 inputSurface = candidate.createInputSurface();
                 candidate.start();
                 codec = candidate;
-                running = true;
-                drainRunning = true;
+                lifecycle.start();
                 failureReported = false;
                 renderThread = new Thread(this::renderLoop, "CameraEglEncoder");
                 drainThread = new Thread(this::drainLoop, "CameraCodecDrain");
@@ -96,11 +94,10 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     }
 
     public synchronized void queueFrame(byte[] bgr24, long presentationTimeUs) {
-        if (!running) throw new IllegalStateException("Encoder is not running");
         if (bgr24 == null || bgr24.length != CameraPreview.FRAME_SIZE) {
             throw new IllegalArgumentException("Invalid BGR24 frame");
         }
-        if (presentationTimeUs < 0) throw new IllegalArgumentException("Negative presentation time");
+        lifecycle.acceptPresentationTime(presentationTimeUs);
         pendingPixels.position(0);
         pendingPixels.put(bgr24);
         pendingPixels.position(0);
@@ -115,7 +112,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
 
     @Override public void requestKeyFrame() {
         MediaCodec current = codec;
-        if (!running || current == null) return;
+        if (!lifecycle.acceptingFrames() || current == null) return;
         Bundle parameters = new Bundle();
         parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
         current.setParameters(parameters);
@@ -127,11 +124,11 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
             egl = new EglState(inputSurface);
             GlState gl = new GlState();
             overlay.onSurfaceCreated();
-            while (drainRunning) {
+            while (true) {
                 long ptsUs;
                 synchronized (this) {
-                    while (running && !framePending) wait();
-                    if (!running) break;
+                    while (lifecycle.acceptingFrames() && !framePending) wait();
+                    if (!framePending) break;
                     GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, gl.texture);
                     pendingPixels.position(0);
                     GLES20.glTexSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0,
@@ -168,7 +165,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         MediaCodec drainingCodec = codec;
         try {
-            while (running) {
+            while (lifecycle.drainingOutput()) {
                 int index = drainingCodec.dequeueOutputBuffer(info, 10_000);
                 if (index == MediaCodec.INFO_TRY_AGAIN_LATER) continue;
                 if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -198,12 +195,12 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
                 boolean end = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
                 drainingCodec.releaseOutputBuffer(index, false);
                 if (end) {
-                    drainRunning = false;
+                    lifecycle.endOfStream();
                     break;
                 }
             }
         } catch (Throwable failure) {
-            if (running) fail(failure);
+            if (lifecycle.drainingOutput()) fail(failure);
         }
     }
 
@@ -217,8 +214,7 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     private void fail(Throwable failure) {
         if (failureReported) return;
         failureReported = true;
-        running = false;
-        drainRunning = false;
+        lifecycle.fail();
         synchronized (this) { notifyAll(); }
         listener.onFailure(failure);
     }
@@ -229,8 +225,8 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
         Thread renderer;
         Thread drainer;
         synchronized (this) {
-            if (!running && codec == null) return;
-            running = false;
+            if (codec == null) return;
+            lifecycle.beginDrain();
             notifyAll();
             current = codec;
             surface = inputSurface;
@@ -241,14 +237,13 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
         }
         join(renderer);
         if (current != null) {
-            try { current.signalEndOfInputStream(); } catch (Exception ignored) { }
+            try {
+                current.signalEndOfInputStream();
+            } catch (Exception failure) {
+                fail(failure);
+            }
         }
         join(drainer);
-        drainRunning = false;
-        if (drainer != null && drainer.isAlive()) {
-            drainer.interrupt();
-            join(drainer);
-        }
         if (current != null) {
             try { current.stop(); } catch (Exception ignored) { }
             current.release();
@@ -258,10 +253,61 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
 
     private static void join(Thread thread) {
         if (thread == null || thread == Thread.currentThread()) return;
-        try {
-            thread.join(2_000);
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
+        boolean interrupted = false;
+        while (thread.isAlive()) {
+            try {
+                thread.join();
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+    }
+
+    static final class EncoderLifecycle {
+        private boolean acceptingFrames;
+        private boolean drainingOutput;
+        private boolean hasPresentationTime;
+        private long lastPresentationTimeUs;
+
+        synchronized void start() {
+            acceptingFrames = true;
+            drainingOutput = true;
+            hasPresentationTime = false;
+        }
+
+        synchronized void acceptPresentationTime(long presentationTimeUs) {
+            if (!acceptingFrames) throw new IllegalStateException("Encoder is not accepting frames");
+            if (presentationTimeUs < 0) {
+                throw new IllegalArgumentException("Negative presentation time");
+            }
+            if (hasPresentationTime && presentationTimeUs <= lastPresentationTimeUs) {
+                throw new IllegalArgumentException("Presentation times must strictly increase");
+            }
+            lastPresentationTimeUs = presentationTimeUs;
+            hasPresentationTime = true;
+        }
+
+        synchronized void beginDrain() {
+            acceptingFrames = false;
+        }
+
+        synchronized void endOfStream() {
+            acceptingFrames = false;
+            drainingOutput = false;
+        }
+
+        synchronized void fail() {
+            acceptingFrames = false;
+            drainingOutput = false;
+        }
+
+        synchronized boolean acceptingFrames() {
+            return acceptingFrames;
+        }
+
+        synchronized boolean drainingOutput() {
+            return drainingOutput;
         }
     }
 
