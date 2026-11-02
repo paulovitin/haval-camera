@@ -122,11 +122,16 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
 
     @Override public void onCodecConfig(byte[] sps, byte[] pps) {
         byte[] message;
-        synchronized (this) {
-            if (!activeCredentials || closed) return;
-            message = bytes(H264WireCodec.encodeConfig(nextSequence(), 0,
-                    stripStartCode(sps), stripStartCode(pps)));
-            configSent = false;
+        try {
+            synchronized (this) {
+                if (!activeCredentials || closed) return;
+                message = bytes(H264WireCodec.encodeConfig(nextSequence(), 0,
+                        stripStartCode(sps), stripStartCode(pps)));
+                configSent = false;
+            }
+        } catch (RuntimeException malformed) {
+            finishCurrent(Status.PROTOCOL_ERROR, "invalid codec config");
+            return;
         }
         queue.offerConfig(message);
         scheduleDrain();
@@ -135,10 +140,15 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
     @Override public void write(EncodedAccessUnit unit) {
         Objects.requireNonNull(unit, "unit");
         byte[] message;
-        synchronized (this) {
-            if (!activeCredentials || closed) return;
-            message = bytes(H264WireCodec.encodeAccessUnit(nextSequence(),
-                    unit.presentationTimeUs, unit.keyframe, nalUnits(unit.data())));
+        try {
+            synchronized (this) {
+                if (!activeCredentials || closed) return;
+                message = bytes(H264WireCodec.encodeAccessUnit(nextSequence(),
+                        unit.presentationTimeUs, unit.keyframe, nalUnits(unit.data())));
+            }
+        } catch (RuntimeException malformed) {
+            finishCurrent(Status.PROTOCOL_ERROR, "invalid access unit");
+            return;
         }
         queue.offerAccessUnit(message, unit.keyframe);
         scheduleDrain();
@@ -194,24 +204,22 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink {
     private void drain() {
         try {
             while (true) {
-                WebSocket destination;
+                boolean rejected;
                 synchronized (this) {
                     if (!connected || !activeCredentials) return;
-                    destination = socket;
-                }
-                BoundedFrameQueue.Message message = queue.poll();
-                if (message == null) return;
-                synchronized (this) {
+                    BoundedFrameQueue.Message message = queue.poll();
+                    if (message == null) return;
                     if (!message.config && !configSent) {
                         requestKeyframe.run();
                         continue;
                     }
+                    rejected = !socket.send(ByteString.of(message.bytes()));
+                    if (message.config && !rejected) configSent = true;
                 }
-                if (!destination.send(ByteString.of(message.bytes()))) {
+                if (rejected) {
                     finishCurrent(Status.NETWORK_ERROR, "send rejected");
                     return;
                 }
-                if (message.config) synchronized (this) { configSent = true; }
             }
         } finally {
             drainScheduled.set(false);

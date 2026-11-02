@@ -307,7 +307,10 @@ public final class TripVideoService extends Service {
     }
 
     private void stopPipeline(boolean preserveLive) {
-        if (preserveLive && coordinator != null) coordinator.releaseLiveSink();
+        if (preserveLive && coordinator != null) {
+            coordinator.releaseLiveSink();
+            if (liveClient != null) liveClient.resetCodec();
+        }
         frames.setEncoder(null);
         EglFrameEncoder oldEncoder = encoder; encoder = null;
         if (oldEncoder != null) oldEncoder.close();
