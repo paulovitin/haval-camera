@@ -547,6 +547,13 @@ public final class TripVideoService extends Service {
         getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().remove(START_PREFIX + tripId).commit();
     }
     public final class LocalBinder extends Binder {
+        /** Read on the main thread immediately before an updater action; never stops capture. */
+        public boolean isUpdateIdle() {
+            if (Looper.myLooper() != Looper.getMainLooper()) throw new IllegalStateException("Main thread required");
+            return UpdateVerifier.idle(capture != null && settings != null && catalog != null,
+                    captureRunning, reducer.state().mode != ServiceStateReducer.Mode.IDLE
+                            || activeTripId != null || encoder != null || coordinator != null);
+        }
         public FrameRouter.Subscription subscribePreview(java.util.function.Consumer<byte[]> consumer) {
             FrameRouter.Subscription subscription = frames.subscribe(consumer); ensureCapture();
             return () -> { subscription.close(); stopCaptureIfUnused(); };

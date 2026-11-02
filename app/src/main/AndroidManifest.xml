@@ -3,6 +3,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="br.com.redesurftank.havalcamera.permission.CONTROL" />
     <permission android:name="br.com.redesurftank.havalcamera.permission.CONTROL"
         android:protectionLevel="signature" />
@@ -17,6 +18,11 @@
             android:authorities="br.com.redesurftank.havalcamera.shizuku"
             android:multiprocess="false" android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <provider android:name=".UpdateFileProvider"
+            android:authorities="br.com.redesurftank.havalcamera.updates"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
         <activity android:name=".CameraActivity" android:exported="true"
             android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize">

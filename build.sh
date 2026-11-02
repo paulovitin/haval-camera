@@ -12,7 +12,7 @@ command -v unzip >/dev/null || { echo 'Missing command: unzip' >&2; exit 1; }
 for name in CAMERA_KEYSTORE CAMERA_KEY_ALIAS CAMERA_STORE_PASS CAMERA_KEY_PASS; do
   [[ -n "${!name:-}" ]] || { echo "Missing release signing variable: $name" >&2; exit 1; }
 done
-for tool in apksigner zipalign; do
+for tool in apksigner zipalign aapt; do
   [[ -x "$BT/$tool" ]] || { echo "Missing Android SDK tool: $BT/$tool (see README.md)" >&2; exit 1; }
 done
 ./gradlew --no-daemon --dependency-verification strict :app:assembleRelease
@@ -27,4 +27,5 @@ SIGNER_SHA256=$("$BT/apksigner" verify --print-certs "$OUT/haval-camera.apk" |
 }
 "$BT/zipalign" -c 4 "$OUT/haval-camera.apk"
 unzip -tq "$OUT/haval-camera.apk"
+bash "$ROOT/scripts/write-update-manifest.sh" "$OUT/haval-camera.apk" "$OUT/update-manifest.json" "$BT"
 printf 'APK: %s\n' "$OUT/haval-camera.apk"

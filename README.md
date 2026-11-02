@@ -74,3 +74,21 @@ O app não publica um serviço de câmera aberto para outros pacotes, nem um end
 O projeto mantém a [AGPL-3.0](LICENSE) escolhida para este repositório. Considere essa licença ao incorporar ou distribuir o código em outro aplicativo. A [Shizuku API](https://github.com/RikkaApps/Shizuku-API) usa a [licença MIT](LICENSES/Shizuku-API.txt).
 
 O APK não inclui os binários Qualcomm nem bibliotecas extraídas da central. Ele usa os componentes que já existem no dispositivo. Este é um projeto independente, sem vínculo com GWM ou Qualcomm.
+
+## Atualização confirmada pelo GitHub
+
+Em **Configurações → Verificar atualização**, o app consulta a release estável mais recente de `rafaelcs28/haval-camera`. **Receber versões de teste** é uma preferência local, desativada por padrão, que permite a primeira release não draft da lista mais recente, incluindo prereleases. A comparação usa somente `versionCode`; versões iguais ou anteriores não são oferecidas.
+
+A release precisa conter exatamente um asset `update-manifest.json` com `schemaVersion: 1`, `versionCode` inteiro positivo até 2147483647, `versionName`, `apk` (nome exato), `size` em bytes (até 1 GiB) e `sha256` em hexadecimal minúsculo. Campos ausentes, duplicados, extras, tipos incorretos, schema desconhecido ou nomes de assets duplicados bloqueiam a oferta. O APK vem do mesmo conjunto de assets, por nome exato; não há escolha do primeiro arquivo `.apk`. Não há token GitHub nem dependência de EcoTrip/Impulse.
+
+O usuário confirma **Baixar**, vê o resultado da verificação e confirma **Instalar**. O app confere tamanho, SHA-256, pacote, versão e o único certificado atual do APK, fixado em `5efec0f94d84d90e769635a81d51e2f25953d5d5b3cea950a115705d3b5e83e0`. APK inválido ou parcial é apagado. O provider de arquivos usa somente `cache/updates/`, não é exportado, só abre em leitura e concede acesso ao instalador pela URI específica. Não há instalação silenciosa. Ao voltar da permissão Android para instalar apps desconhecidos, verifique e confirme novamente; não há instalação automática no retorno.
+
+Captura ou gravação ativa bloqueia download/instalação. Abrir Configurações já encerra a visualização local pelo ciclo existente da Activity. A atualização não força parada de gravação nem de transmissão remota; aguarde o serviço ficar ocioso. O estado é consultado novamente imediatamente antes de abrir o instalador. Sair de Configurações cancela trabalho pendente. A instalação real, as telas de permissão e o provider ainda precisam de validação no Android 9 físico; os testes JVM não substituem esse gate.
+
+No Mac Mini autorizado, `build.sh` agora também executa:
+
+```sh
+bash scripts/write-update-manifest.sh build/haval-camera.apk build/update-manifest.json "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+```
+
+O script verifica assinatura fixada, alinhamento e ZIP; lê pacote/versão do APK com `aapt`, calcula tamanho/hash e grava JSON atomicamente. Não recebe versão/hash manualmente e não publica nada. Ao publicar uma release autorizada, anexe **o mesmo APK verificado** e seu `update-manifest.json`. O job existente pode devolver apenas APK/log; o manifesto fica em `source/build/update-manifest.json` no diretório do job. Não execute esse script nem ferramentas SDK no coordenador. `app/build.gradle.kts` e dependências permanecem iguais: a versão instalada vem de `PackageManager`, dispensando `BuildConfig` e um novo digest de controles de build.
