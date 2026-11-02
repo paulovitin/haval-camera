@@ -35,7 +35,7 @@ sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973' 'cmak
 export ANDROID_HOME=/caminho/para/android-sdk
 ```
 
-O projeto também aceita `ANDROID_SDK_ROOT`; no macOS, o script usa `$HOME/Library/Android/sdk` como padrão. Compile SDK 36, min/target SDK 28 e ABI `arm64-v8a` permanecem fixos. Java, AIDL e `app/src/main/cpp/CMakeLists.txt` mantêm os diretórios existentes; JNI usa extração legada para o `LD_PRELOAD`.
+O projeto também aceita `ANDROID_SDK_ROOT`; no macOS, o script usa `$HOME/Library/Android/sdk` como padrão. Compile SDK 36, min/target SDK 28 e ABI `arm64-v8a` permanecem fixos. Como o APK é específico para instalação direta na central e não para o Google Play, somente o lint `ExpiredTargetSdkVersion` fica desativado; os demais continuam ativos. Java, AIDL e `app/src/main/cpp/CMakeLists.txt` mantêm os diretórios existentes; JNI usa extração legada para o `LD_PRELOAD`.
 
 Para concluir o bootstrap **apenas no Mac Mini autorizado**, gere o wrapper e os metadados com o Gradle 8.14.3 confiável. Os comandos de geração abaixo não são evidência de um build verificado:
 

@@ -48,6 +48,7 @@ android {
     }
     packaging { jniLibs.useLegacyPackaging = true }
     sourceSets.getByName("main").assets.srcDir(prepareLicenseAssets)
+    lint { disable += "ExpiredTargetSdkVersion" }
 
     signingConfigs {
         if (hasReleaseSigning) {
