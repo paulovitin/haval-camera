@@ -52,11 +52,19 @@ public final class BoundedFrameQueue {
 
     public synchronized boolean offerConfig(byte[] data) {
         Message message = message(data, true, false);
-        removeWhere(existing -> existing.config);
-        while (!fits(message) && removeOldestAccessUnit()) { }
-        if (!fits(message)) return false;
+        if (message.size() > maxBytes) return false;
+        boolean replacedStream = messages.stream().anyMatch(existing -> !existing.config);
+        messages.clear();
+        bytes = 0;
         messages.addFirst(message);
         bytes += message.size();
+        if (replacedStream) {
+            recovering = true;
+            if (!syncRequested) {
+                syncRequested = true;
+                requestSync.run();
+            }
+        }
         return true;
     }
 
@@ -113,19 +121,6 @@ public final class BoundedFrameQueue {
         return message.size() <= maxBytes
                 && messages.size() < maxMessages
                 && bytes + message.size() <= maxBytes;
-    }
-
-    private boolean removeOldestAccessUnit() {
-        Iterator<Message> iterator = messages.iterator();
-        while (iterator.hasNext()) {
-            Message message = iterator.next();
-            if (!message.config) {
-                iterator.remove();
-                bytes -= message.size();
-                return true;
-            }
-        }
-        return false;
     }
 
     private void removeWhere(java.util.function.Predicate<Message> predicate) {
