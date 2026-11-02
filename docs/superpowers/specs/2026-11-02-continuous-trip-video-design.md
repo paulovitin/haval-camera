@@ -28,6 +28,7 @@ The camera recorder remains a separate Android application. Haval EcoTrip suppli
 - Provide authenticated live video with a target glass-to-glass latency of 1-2 seconds.
 - Allow resumable retrieval of recordings while the car is online.
 - Allow on-demand live viewing while parked when the head unit is already powered.
+- Let the owner control safe recording, retention, live-view, and transfer settings inside Haval Camera.
 - Preserve strict root-path validation and never create raw camera dumps.
 
 ## Non-goals
@@ -111,6 +112,21 @@ Haval Hub owns:
 - local download state and playback;
 - clear offline, unavailable, and transfer-progress states.
 
+## User settings and safe defaults
+
+Haval Camera exposes a local settings screen. Settings persist in private app storage and remain available without Haval EcoTrip.
+
+- Automatic trip recording: on by default. Haval Camera still stores the latest authoritative trip state while disabled, so enabling it can start the current trip without replaying stale commands.
+- Record parked live sessions: off by default. When enabled, only an authenticated parked live session is recorded; this is not continuous sentry recording.
+- Remote live viewing: on by default. Disabling it rejects new sessions and closes an active session.
+- Remote recording downloads: on by default. Disabling it cancels active transfer reads without deleting local files.
+- Quality preset: Standard by default. Economy is 1760 x 720 at 10 fps and 2 Mbps; Standard is 15 fps and 4 Mbps; High is 15 fps and 6 Mbps. Every preset keeps one-second keyframes and hardware AVC. Unsupported presets fail visibly without software fallback.
+- Minimum free space: 5 GB by default, with 10 GB and 20 GB choices.
+- Automatic deletion: on by default. When disabled, no completed trip is deleted automatically; recording stops visibly before violating the selected free-space reserve.
+- Delete recordings: deletes completed local trips only after explicit confirmation. Active and transferring trips remain protected.
+
+Quality changes apply to the next recording or live-only encoder start. Storage settings apply before the next segment opens. Feature toggles apply immediately through the service reducer. Fixed source resolution, QCarCam input, root paths, protocol limits, authentication, and signature permissions are not user-configurable.
+
 ## Android component design
 
 ### Capture user service
@@ -147,7 +163,7 @@ Recording transfer is an independent file-I/O state. It may run while recording 
 
 The source remains fixed at 1760 x 720 BGR24 and approximately 15 fps. A headless EGL context uploads each complete frame once, performs the BGR-to-RGB channel correction in the shader, and renders into a `MediaCodec` input surface.
 
-Initial encoder settings:
+Standard encoder settings:
 
 - MIME: `video/avc`;
 - resolution: 1760 x 720;
@@ -218,8 +234,8 @@ Retention runs before recording starts, after every segment closes, and when sto
 
 1. Calculate free bytes on the recording filesystem.
 2. Exclude the active trip and active transfer.
-3. Delete the oldest completed trip directories atomically until at least 5 GB is free.
-4. If 5 GB cannot be recovered, stop recording before the filesystem fills and report the error.
+3. When automatic deletion is enabled, delete the oldest completed trip directories atomically until the selected reserve is free.
+4. When deletion is disabled or the selected reserve cannot be recovered, stop recording before the filesystem fills and report the error.
 
 Retention deletes whole trips, not isolated middle segments. It never deletes an active trip or file being transferred. Pinning or permanent retention is not part of the first version.
 
@@ -262,7 +278,7 @@ Backpressure policy favors freshness:
 
 The iOS client decodes with VideoToolbox or `AVSampleBufferDisplayLayer`. It resets its decoder when codec configuration changes and shows connection quality, not a stale frame, after timeout.
 
-At 4 Mbps, live viewing uses approximately 1.8 GB per hour before protocol overhead. The UI displays that live video uses mobile data.
+At Standard quality, live viewing uses approximately 1.8 GB per hour before protocol overhead. The UI displays estimated mobile-data use for the selected preset.
 
 ## Recording retrieval
 
@@ -356,7 +372,7 @@ No release is described as camera-safe until hardware checks pass on the target 
 - Every accepted automatic trip produces ordered, playable MP4 segments or a visible failure reason.
 - Rejected trips leave no retained footage.
 - Completed segments survive app and network failures.
-- Storage remains at or above the 5 GB reserve unless unrelated data already prevents it; recording then stops safely.
+- Storage remains at or above the selected reserve unless unrelated data already prevents it; recording then stops safely.
 - Live viewing starts only for an authenticated request and reaches the viewer without unbounded queue growth.
 - Parked live viewing works only while the head unit is already powered.
 - Downloads resume by offset and pass SHA-256 verification.

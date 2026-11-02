@@ -16,12 +16,14 @@
 - Production Haval Camera and Haval EcoTrip APKs must use the same approved certificate; never commit signing files or passwords.
 - Preserve the exact QCarCam input 4, 1760 x 720 BGR24, `-dumpFrame=2`, `3>&1 1>&2`, canonical-path checks, private OEM client copy, pipe validation, and parent-death behavior.
 - Never write BGR24/raw frames, use a software encoder, commit OEM binaries, or log video payloads.
-- Use AVC surface encoding at 1760 x 720, 15 fps, 4 Mbps, one-second keyframes; fail visibly if no hardware surface encoder works.
-- Write 60-second MP4 segments and preserve at least 5 GB free by deleting oldest completed whole trips only.
+- Use AVC surface encoding at 1760 x 720 with safe Economy (10 fps/2 Mbps), Standard (15 fps/4 Mbps), and High (15 fps/6 Mbps) presets and one-second keyframes; fail visibly if no hardware surface encoder works.
+- Write 60-second MP4 segments. Default retention preserves 5 GB free; settings may select 10 GB or 20 GB and may disable automatic deletion.
 - Local recording must not wait for or fail because of network, bridge, viewer, or transfer state.
 - Live and transfer use TLS, short-lived scoped credentials, one viewer, one producer, and one transfer; live pauses transfer.
 - Bridge never persists live frames or recording bytes; only completed-trip metadata may be cached.
 - Parked live viewing works only while the head unit is already powered and expires after 30 minutes unless renewed.
+- Parked recording is off by default and, when enabled, records only authenticated parked live sessions. It is not sentry mode.
+- Keep source geometry, QCarCam input, root paths, protocol limits, authentication, and signature permissions fixed; expose only safe presets and feature toggles.
 - Keep camera faults isolated from Haval EcoTrip telemetry, trips, controls, and updates.
 - Haval Camera remains AGPL-3.0 and must ship source/notices; preserve the Shizuku MIT notice and add third-party notices for new dependencies.
 - Never run Android, Gradle, Kotlin, or Xcode builds on the coordinator. Use an audited Git commit on the authorized Mac Mini; do not fall back locally.
@@ -31,7 +33,7 @@
 ## Review Focus
 
 - Delayed, duplicated, or out-of-order trip commands must never restart an old trip or delete the current trip; Tasks 2 and 6 pin revision and reconciliation behavior.
-- Low storage during an active recording must preserve active/transferring data and stop safely if 5 GB cannot be recovered; Task 3 pins deletion selection.
+- Low storage during an active recording must preserve active/transferring data and stop safely if the selected reserve cannot be recovered; Task 3 pins deletion selection.
 - Slow or disconnected viewers must never block encoder output or grow memory without bound; Tasks 7 and 8 pin bounded queue behavior.
 - Missing, malformed, or changed AVC configuration and keyframes must reset cleanly instead of showing stale video; Tasks 2, 4, and 9 pin framing and decoder reset.
 - Process death during segment close must preserve completed MP4s, remove unusable partials, and resume into a new segment; Tasks 3, 5, and 13 pin recovery.
@@ -216,7 +218,7 @@ Use `files/trip-video/<tripId>/`, `trip.json`, ordered six-digit segment names, 
 
 - [ ] **Step 3: Write failing retention tests**
 
-Cover deleting oldest completed whole trips until 5 GB free, preserving active and transferring trips, no middle-segment deletion, and returning `cannotRecoverReserve` when unrelated data prevents recovery.
+Cover 5/10/20 GB reserves, deleting oldest completed whole trips, automatic deletion disabled, preserving active and transferring trips, no middle-segment deletion, and returning `cannotRecoverReserve` when unrelated data prevents recovery.
 
 - [ ] **Step 4: Implement `RetentionPlanner`**
 
@@ -265,7 +267,7 @@ Implement `CameraCaptureClient.start(FrameConsumer)` and `stop()` using the exis
 
 - [ ] **Step 3: Implement `EglFrameEncoder`**
 
-Select only a hardware AVC encoder supporting `COLOR_FormatSurface`; configure exact design values; upload BGR once; correct channels in shader; set presentation timestamps; drain codec on its own thread; expose SPS/PPS and request-sync-frame.
+Select only a hardware AVC encoder supporting `COLOR_FormatSurface`; configure one validated quality preset; upload BGR once; correct channels in shader; set presentation timestamps; drain codec on its own thread; expose SPS/PPS and request-sync-frame.
 
 - [ ] **Step 4: Implement `SegmentMuxer`**
 
@@ -283,7 +285,7 @@ Expected: coordinator tests pass and APK builds. Do not claim camera compatibili
 
 - [ ] **Step 7: Perform Gate 1 on parked hardware**
 
-Install the debug APK on the explicitly selected authorized head unit. Record 10 minutes in P. Verify hardware codec name, 15 fps target, six or more playable segments, colors, monotonic timestamps, hashes, no `/data/vendor/camera` dumps, no orphan child, CPU/memory/temperature evidence, and successful reopen.
+Install the debug APK on the explicitly selected authorized head unit. Record 10 minutes in P using Standard. Verify hardware codec name, 15 fps target, six or more playable segments, colors, monotonic timestamps, hashes, no `/data/vendor/camera` dumps, no orphan child, CPU/memory/temperature evidence, and successful reopen. Then smoke-test Economy and High without claiming them supported if hardware configuration fails.
 
 - [ ] **Step 8: Commit evidence and code**
 
@@ -300,17 +302,20 @@ git commit -m "feat: record hardware encoded camera segments"
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoCatalogProvider.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoGalleryActivity.java`
 - Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoPlaybackActivity.java`
+- Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettings.java`
+- Create: `app/src/main/java/br/com/redesurftank/havalcamera/VideoSettingsActivity.java`
 - Create: `app/src/test/java/br/com/redesurftank/havalcamera/ServiceStateReducerTest.java`
+- Create: `app/src/test/java/br/com/redesurftank/havalcamera/VideoSettingsTest.java`
 - Modify: `app/src/main/java/br/com/redesurftank/havalcamera/CameraActivity.java`
 - Modify: `app/src/main/AndroidManifest.xml`
 
 **Interfaces:**
 - Consumes: Task 2 commands, Task 3 catalog, Task 4 coordinator.
-- Produces: signature-protected explicit service commands; read-only provider URIs; local gallery/player.
+- Produces: signature-protected explicit service commands; read-only provider URIs; local gallery/player; private persisted safe settings.
 
 - [ ] **Step 1: Write failing service-state tests**
 
-Cover idle, recording, live-only, recording-live, transfer flag, 15-second viewer grace, 30-minute parked expiry, live-pauses-transfer, viewer loss preserving recording, and restart reconciliation.
+Cover idle, recording, live-only, recording-live, transfer flag, 15-second viewer grace, 30-minute parked expiry, live-pauses-transfer, viewer loss preserving recording, restart reconciliation, every feature toggle, and disabled-to-enabled current-trip activation.
 
 - [ ] **Step 2: Implement the pure reducer**
 
@@ -324,21 +329,25 @@ Register it as exported only behind the signature permission. Start foreground b
 
 Provider exports metadata and content URIs read-only under a separate signature read permission. Gallery groups completed trips and active state. Player advances ordered local MP4 segments and blanks on errors.
 
-- [ ] **Step 5: Verify**
+- [ ] **Step 5: Implement safe settings**
+
+Persist automatic trip recording, parked-live recording, remote live, remote downloads, quality preset, 5/10/20 GB reserve, and automatic deletion in private SharedPreferences. Add a settings activity reachable from CameraActivity. Use presets only. Require confirmation before deleting completed recordings; never delete active or transferring trips. Apply quality on the next encoder start, storage before the next segment, and feature toggles immediately.
+
+- [ ] **Step 6: Verify**
 
 Run on Mac Mini: `./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug`
 
 Expected: reducer tests pass; manifest merge shows both permissions; APK verification passes.
 
-- [ ] **Step 6: Hardware lifecycle check**
+- [ ] **Step 7: Hardware lifecycle check**
 
 Verify close/reopen, service stop, process death, Shizuku restart, app restart, and head-unit restart. Confirm completed segments survive and only `.partial` is discarded.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add app/src/main app/src/test docs/VALIDATION.md
-git commit -m "feat: add camera recording service and gallery"
+git commit -m "feat: add camera recording service and settings"
 ```
 
 ### Task 6: Haval EcoTrip Trip and Remote-Control Bridge
@@ -515,7 +524,7 @@ Match HVC1 exactly. Keep parsing off the main actor and cap messages at 4 MiB.
 
 - [ ] **Step 3: Write failing session tests with injected URLSession/WebSocket transport**
 
-Cover authenticated start, offline response, reconnect, stale-frame blanking, viewer cancellation, 30-minute renewal, and showing estimated 4 Mbps data use.
+Cover authenticated start, offline response, reconnect, stale-frame blanking, viewer cancellation, 30-minute renewal, and showing estimated data use for the selected quality preset.
 
 - [ ] **Step 4: Implement decoder and live session**
 
