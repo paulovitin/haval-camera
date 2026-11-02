@@ -63,6 +63,22 @@ public final class CommandJournalTest {
     }
 
     @Test
+    public void stoppedTripCanResumeWithOriginalIdentity() {
+        CommandJournal journal = new CommandJournal(new MemoryPreferences());
+        assertEquals(CommandJournal.Outcome.APPLIED,
+                journal.apply(1, "start", VideoContract.Command.START_TRIP, "100").outcome);
+        assertEquals(CommandJournal.Outcome.APPLIED,
+                journal.apply(2, "stop", VideoContract.Command.STOP_TRIP, "100").outcome);
+
+        CommandJournal.Decision resumed =
+                journal.apply(3, "resume", VideoContract.Command.START_TRIP, "100");
+
+        assertEquals(CommandJournal.Outcome.APPLIED, resumed.outcome);
+        assertEquals("100", resumed.activeTripId);
+        assertEquals(3, resumed.revision);
+    }
+
+    @Test
     public void reconcileSupersedesIncrementalCommandsAtSameOrLowerRevision() {
         CommandJournal journal = new CommandJournal(new MemoryPreferences());
         assertEquals(CommandJournal.Outcome.APPLIED,

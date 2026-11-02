@@ -176,6 +176,43 @@ public final class VideoCatalogTest {
     }
 
     @Test
+    public void completedAutomaticTripReopensAndAppendsWithoutLosingSegments() throws Exception {
+        VideoCatalog first = new VideoCatalog(temporaryFolder.getRoot());
+        first.beginTrip("101", 1_000, VideoCatalog.Source.AUTOMATIC);
+        writePartial("101", "one");
+        first.completeSegment("101",
+                new VideoCatalog.SegmentMetadata(1_000, 2_000, 1_000_000, 3, SHA_ONE, AVC));
+        first.completeTrip("101", 2_000);
+
+        first.beginTrip("101", 1_000, VideoCatalog.Source.AUTOMATIC);
+        assertFalse(first.localSnapshot().get(0).completed);
+        assertEquals(1, first.localSnapshot().get(0).segments.size());
+        writePartial("101", "two");
+        first.completeSegment("101",
+                new VideoCatalog.SegmentMetadata(3_000, 4_000, 1_000_000, 3, SHA_TWO, AVC));
+        first.completeTrip("101", 4_000);
+
+        VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
+        recovered.recover();
+        VideoCatalog.Trip trip = recovered.completedSnapshot().get(0);
+        assertEquals(1_000, trip.startMs);
+        assertEquals(2, trip.segments.size());
+        assertEquals("000001.mp4", trip.segments.get(0).fileName);
+        assertEquals("000002.mp4", trip.segments.get(1).fileName);
+    }
+
+    @Test
+    public void completedTripCannotReopenWithChangedIdentity() throws Exception {
+        VideoCatalog catalog = new VideoCatalog(temporaryFolder.getRoot());
+        catalog.beginTrip("102", 1_000, VideoCatalog.Source.AUTOMATIC);
+        catalog.completeTrip("102", 2_000);
+
+        assertThrows(IllegalStateException.class,
+                () -> catalog.beginTrip("102", 1_001, VideoCatalog.Source.AUTOMATIC));
+        assertTrue(catalog.completedSnapshot().get(0).completed);
+    }
+
+    @Test
     public void discardRemovesOnlyValidatedTripDirectory() throws Exception {
         VideoCatalog catalog = new VideoCatalog(temporaryFolder.getRoot());
         catalog.beginTrip("123", 1_000, VideoCatalog.Source.AUTOMATIC);
