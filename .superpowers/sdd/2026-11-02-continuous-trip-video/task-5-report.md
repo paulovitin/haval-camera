@@ -181,3 +181,32 @@ Status: DONE. Exactly the five requested findings were addressed without hardwar
 ### Hardware limits
 
 Step 8 remains unexecuted. No APK was installed or published. Vehicle camera ownership, parked-live shutdown on the head unit, exact catalog timestamps after real capture, process/reconcile recovery, local deletion during real LAN/provider reads, playback, OEM AVM coexistence, CPU, memory, storage, and temperature remain hardware gates.
+
+## Fix round 3 — repeated START_TRIP metadata
+
+Status: DONE. A higher-revision `START_TRIP` for the active trip still commits its revision and request ID as a protocol `NO_OP`, but no longer executes metadata staging or overwrites the original durable start timestamp.
+
+### TDD and Mac Mini evidence
+
+- RED commit: `9e3547ddb72c43b7` (`test: preserve start metadata on repeated start`).
+- RED job: `haval-camera-9e3547ddb72c43b7-20261102T200610Z-8697`.
+- RED archive SHA-256: `db0087e6a13fa11dd08e64f69f3b210329c9e61468ac202ad88ffc6dc1735a22`.
+- Expected RED: 85 tests ran; the new repeated-start regression was the only failure because `service.tripStart.<id>` changed from the original value.
+- GREEN commit: `c6cfa652c5bc8cf1` (`fix: preserve start metadata on no-op start`).
+- GREEN job: `haval-camera-c6cfa652c5bc8cf1-20261102T200639Z-10042`.
+- GREEN archive SHA-256: `69b07b4eff1b26f31f3f81abd98e4eb840b5afa7ea9d42e01857d4a981bf1784`.
+- All 85 JVM tests passed. Debug/native ARM64 assembly passed in 14s with 41 tasks; release, lint-vital, signing, alignment, and ZIP integrity passed in 17s with 50 tasks.
+- Fetched evidence: `/root/projects/haval-camera/.artifacts/task5-round3-c6cfa65/`.
+- APK SHA-256: `e9e8cacca94210805ddbdb22956b85374b6527b1a6751ccbc05dd3e540ffa32c`.
+- Build log SHA-256: `c38095a1f96e018c94c9fedae14d97bc850a502152f855f36db52c8796d710e7`.
+- Only the seven previously deferred AndroidX/deprecation warnings remain.
+
+### Changed paths
+
+- `app/src/main/java/br/com/redesurftank/havalcamera/CommandJournal.java`
+- `app/src/test/java/br/com/redesurftank/havalcamera/CommandJournalTest.java`
+- `.superpowers/sdd/2026-11-02-continuous-trip-video/task-5-report.md`
+
+### Hardware limits
+
+Step 8 remains unexecuted. No APK was installed or published. This regression is fully covered at the durable journal boundary; vehicle process restart and real EcoTrip replay remain pending hardware/integration gates.
