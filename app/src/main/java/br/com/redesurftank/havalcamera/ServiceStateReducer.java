@@ -195,7 +195,7 @@ public final class ServiceStateReducer {
                 recording = null; manual = false; parkedRecording = false; authoritative = null; break;
             case VIEWER_CONNECTED:
                 if (liveAllowed) {
-                    viewer = true; lostAt = -1; liveStarted = event.nowMs;
+                    viewer = true; lostAt = -1; liveStarted = event.nowMs; error = null;
                     if (parked && recording == null) {
                         recording = Long.toString(event.nowMs);
                         manual = true;
