@@ -1,0 +1,12 @@
+.DS_Store
+.gradle/
+**/build/
+local.properties
+release/
+*.apk
+*.idsig
+*.jks
+*.keystore
+*.raw
+*.log
+.idea/

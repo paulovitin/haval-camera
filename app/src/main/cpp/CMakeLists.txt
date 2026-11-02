@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(haval_camera C)
+add_library(camera_stream SHARED camera_stream.c)
+target_compile_options(camera_stream PRIVATE -O2 -Wall -Wextra -Werror)
+target_link_libraries(camera_stream PRIVATE dl)
