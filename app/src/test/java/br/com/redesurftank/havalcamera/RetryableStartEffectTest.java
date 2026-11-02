@@ -106,6 +106,7 @@ public final class RetryableStartEffectTest {
 
         assertEquals(2, starts.get());
         assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
+        assertNull(reducer.state().error);
     }
 
     @Test public void nonStartEffectFailureDoesNotBecomeAPipelineStartFailure() {
