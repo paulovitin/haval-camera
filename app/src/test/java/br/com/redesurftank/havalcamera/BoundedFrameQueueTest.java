@@ -64,6 +64,25 @@ public final class BoundedFrameQueueTest {
         assertNull(queue.poll());
     }
 
+    @Test public void changedConfigDropsOldAccessUnitsUntilANewKeyframe() {
+        AtomicInteger syncRequests = new AtomicInteger();
+        BoundedFrameQueue queue = new BoundedFrameQueue(100, 10, syncRequests::incrementAndGet);
+        queue.offerConfig(bytes(1));
+        queue.offerAccessUnit(bytes(2), true);
+        queue.offerAccessUnit(bytes(3), false);
+
+        queue.offerConfig(bytes(9));
+
+        assertTrue(queue.isRecovering());
+        assertEquals(1, syncRequests.get());
+        BoundedFrameQueue.Message config = queue.poll();
+        assertTrue(config.config);
+        assertArrayEquals(bytes(9), config.bytes());
+        assertNull(queue.poll());
+        assertFalse(queue.offerAccessUnit(bytes(4), false));
+        assertTrue(queue.offerAccessUnit(bytes(5), true));
+    }
+
     @Test public void productionLimitsAreOneMibAndThirtyMessages() {
         assertEquals(1024 * 1024, BoundedFrameQueue.MAX_BYTES);
         assertEquals(30, BoundedFrameQueue.MAX_MESSAGES);

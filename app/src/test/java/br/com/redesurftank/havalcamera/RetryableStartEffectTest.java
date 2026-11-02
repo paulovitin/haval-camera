@@ -85,6 +85,29 @@ public final class RetryableStartEffectTest {
                 + "        RetryableStartEffect.apply(reducer, event, nextSequence(), this::execute);"));
     }
 
+    @Test public void failedLiveOnlyCaptureCanBeRetriedWithFreshCredentials() throws Exception {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        AtomicInteger starts = new AtomicInteger();
+
+        assertThrows(IOException.class, () -> RetryableStartEffect.apply(reducer,
+                ServiceStateReducer.Event.viewerConnected(1, 1_000), 2, effect -> {
+                    if (effect.type == ServiceStateReducer.EffectType.START_CAPTURE) {
+                        starts.incrementAndGet();
+                        throw new IOException("camera unavailable");
+                    }
+                }));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+
+        RetryableStartEffect.apply(reducer,
+                ServiceStateReducer.Event.viewerConnected(3, 2_000), 4, effect -> {
+                    if (effect.type == ServiceStateReducer.EffectType.START_CAPTURE)
+                        starts.incrementAndGet();
+                });
+
+        assertEquals(2, starts.get());
+        assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
+    }
+
     @Test public void nonStartEffectFailureDoesNotBecomeAPipelineStartFailure() {
         ServiceStateReducer reducer = new ServiceStateReducer();
         reducer.apply(ServiceStateReducer.Event.startAutomatic("100", 1));
