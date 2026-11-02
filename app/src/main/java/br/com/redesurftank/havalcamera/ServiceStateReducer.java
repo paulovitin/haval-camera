@@ -18,7 +18,11 @@ public final class ServiceStateReducer {
     public static final class Effect {
         public final EffectType type;
         public final String tripId;
-        Effect(EffectType type, String tripId) { this.type = type; this.tripId = tripId; }
+        public final long endMs;
+        Effect(EffectType type, String tripId) { this(type, tripId, -1); }
+        Effect(EffectType type, String tripId, long endMs) {
+            this.type = type; this.tripId = tripId; this.endMs = endMs;
+        }
     }
 
     public static final class State {
@@ -102,9 +106,15 @@ public final class ServiceStateReducer {
         public static Event startManual(String id, long sequence) {
             return simple(EventType.START_MANUAL, sequence, requiredId(id), 0);
         }
-        public static Event stopManual(long sequence) { return simple(EventType.STOP_MANUAL, sequence, null, 0); }
+        public static Event stopManual(long sequence) { return stopManual(-1, sequence); }
+        public static Event stopManual(long endMs, long sequence) {
+            return simple(EventType.STOP_MANUAL, sequence, null, endMs);
+        }
         public static Event stopAutomatic(String id, long sequence) {
-            return simple(EventType.STOP_AUTOMATIC, sequence, requiredId(id), 0);
+            return stopAutomatic(id, -1, sequence);
+        }
+        public static Event stopAutomatic(String id, long endMs, long sequence) {
+            return simple(EventType.STOP_AUTOMATIC, sequence, requiredId(id), endMs);
         }
         public static Event pipelineFailed(long sequence, String detail) {
             return new Event(EventType.PIPELINE_FAILED, sequence, null, 0,
@@ -210,7 +220,10 @@ public final class ServiceStateReducer {
                 if (!automatic && !manual) recording = null;
                 else if (automatic && recording == null && authoritative != null) recording = authoritative;
                 if (!parked && parkedRecording) { recording = null; manual = false; parkedRecording = false; }
-                if (!liveAllowed) { viewer = false; lostAt = -1; liveStarted = -1; }
+                if (!liveAllowed) {
+                    viewer = false; lostAt = -1; liveStarted = -1;
+                    if (parkedRecording) { recording = null; manual = false; parkedRecording = false; }
+                }
                 if (!downloads) { transfer = false; paused = false; }
                 break;
             case TICK:
@@ -233,7 +246,14 @@ public final class ServiceStateReducer {
         state = new State(mode, recording, manual, parkedRecording, transfer, paused, automatic, parked,
                 liveAllowed, downloads, authoritative, lostAt, liveStarted, error);
         List<Effect> result = new ArrayList<>(effects(old, state));
-        if (finalize) result.add(new Effect(EffectType.FINALIZE_TRIP, event.tripId));
+        if (event.type == EventType.STOP_MANUAL || event.type == EventType.STOP_AUTOMATIC) {
+            for (int index = 0; index < result.size(); index++) {
+                Effect effect = result.get(index);
+                if (effect.type == EffectType.STOP_RECORDING)
+                    result.set(index, new Effect(effect.type, effect.tripId, event.nowMs));
+            }
+        }
+        if (finalize) result.add(new Effect(EffectType.FINALIZE_TRIP, event.tripId, event.nowMs));
         return Collections.unmodifiableList(result);
     }
 

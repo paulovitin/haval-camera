@@ -88,6 +88,10 @@ public final class VideoCatalog {
         writeIndex();
     }
 
+    public synchronized long tripStartMs(String tripId) {
+        return requireTrip(parseTripId(tripId)).startMs;
+    }
+
     public synchronized Segment completeSegment(String tripId, SegmentMetadata metadata)
             throws IOException {
         MutableTrip trip = requireTrip(parseTripId(tripId));

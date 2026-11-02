@@ -150,11 +150,16 @@ public final class ServiceStateReducerTest {
     @Test public void suppliedStopTimesReachFinalizationEffects() {
         ServiceStateReducer automatic = new ServiceStateReducer();
         automatic.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
-        ServiceStateReducer.Effect automaticEnd = automatic.apply(
-                ServiceStateReducer.Event.stopAutomatic("10", 9_999, 2)).stream()
+        java.util.List<ServiceStateReducer.Effect> automaticEffects = automatic.apply(
+                ServiceStateReducer.Event.stopAutomatic("10", 9_999, 2));
+        ServiceStateReducer.Effect automaticEnd = automaticEffects.stream()
                 .filter(effect -> effect.type == ServiceStateReducer.EffectType.FINALIZE_TRIP)
                 .findFirst().orElseThrow();
         assertEquals(9_999, automaticEnd.endMs);
+        ServiceStateReducer.Effect automaticStop = automaticEffects.stream()
+                .filter(effect -> effect.type == ServiceStateReducer.EffectType.STOP_RECORDING)
+                .findFirst().orElseThrow();
+        assertEquals(9_999, automaticStop.endMs);
 
         ServiceStateReducer manual = new ServiceStateReducer();
         manual.apply(ServiceStateReducer.Event.startManual("20", 1));

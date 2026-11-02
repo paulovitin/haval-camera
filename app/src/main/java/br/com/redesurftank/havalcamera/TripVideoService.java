@@ -16,7 +16,6 @@ import android.os.SystemClock;
 import android.util.Log;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /** Foreground owner of recording lifecycle. Remote transport arrives in Task 8. */
@@ -95,7 +94,6 @@ public final class TripVideoService extends Service {
             updateOverlay();
             return;
         }
-        if (VideoContract.ACTION_DELETE_LOCAL.equals(action)) { deleteCompleted(); return; }
         if (VideoContract.ACTION_START_MANUAL_RECORDING.equals(action)) {
             if (reducer.state().tripId != null || reducer.state().authoritativeTripId != null) return;
             long start = intent.getLongExtra(VideoContract.EXTRA_START_MS, System.currentTimeMillis());
@@ -104,7 +102,8 @@ public final class TripVideoService extends Service {
             return;
         }
         if (VideoContract.ACTION_STOP_MANUAL_RECORDING.equals(action)) {
-            apply(ServiceStateReducer.Event.stopManual(nextSequence()));
+            long endMs = requireEndMs(intent, reducer.state().tripId);
+            apply(ServiceStateReducer.Event.stopManual(endMs, nextSequence()));
             return;
         }
         if (VideoContract.ACTION_TELEMETRY_SAMPLE.equals(action)) {
@@ -117,26 +116,35 @@ public final class TripVideoService extends Service {
         String tripId = intent.getStringExtra(VideoContract.EXTRA_TRIP_ID);
         long revision = intent.getLongExtra(VideoContract.EXTRA_STATE_REVISION, -1);
         String requestId = intent.getStringExtra(VideoContract.EXTRA_REQUEST_ID);
-        CommandJournal.Decision decision = journal.apply(revision, requestId, command, tripId);
+        final long stagedStartMs;
+        if (command == VideoContract.Command.START_TRIP) stagedStartMs = requireStartMs(intent);
+        else stagedStartMs = -1;
+        final long suppliedEndMs;
+        if (command == VideoContract.Command.STOP_TRIP) suppliedEndMs = requireEndMs(intent, tripId);
+        else suppliedEndMs = -1;
+        CommandJournal.Decision decision = command == VideoContract.Command.START_TRIP
+                ? journal.applyStaged(revision, requestId, command, tripId,
+                        editor -> editor.putLong(START_PREFIX + tripId, stagedStartMs))
+                : journal.apply(revision, requestId, command, tripId);
         if (decision.outcome != CommandJournal.Outcome.APPLIED
                 && decision.outcome != CommandJournal.Outcome.NO_OP) return;
         switch (command) {
             case START_TRIP:
+                if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
+                    apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
+                }
+                apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
+                break;
             case RECONCILE:
                 if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
                     apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
                 }
-                if (tripId == null) {
-                    if (decision.previousTripId != null)
-                        apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
-                } else {
-                    long startMs = requireStartMs(intent);
-                    persistTripStart(tripId, startMs);
-                    apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
-                }
+                if (tripId == null) break;
+                recoverReconcileStart(intent, tripId);
+                apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
                 break;
             case STOP_TRIP:
-                apply(ServiceStateReducer.Event.stopAutomatic(tripId, nextSequence()));
+                apply(ServiceStateReducer.Event.stopAutomatic(tripId, suppliedEndMs, nextSequence()));
                 break;
             case DISCARD_TRIP:
                 apply(ServiceStateReducer.Event.stopAutomatic(tripId, nextSequence()));
@@ -173,14 +181,16 @@ public final class TripVideoService extends Service {
             case STOP_RECORDING:
                 stopPipeline();
                 if (activeTripId != null && activeTripId.equals(effect.tripId)) {
-                    catalog.completeTrip(activeTripId, System.currentTimeMillis());
+                    catalog.completeTrip(activeTripId,
+                            effect.endMs >= 0 ? effect.endMs : System.currentTimeMillis());
                     activeTripId = null;
                     clearPersistedRecording();
                 }
                 break;
             case PAUSE_RECORDING:
                 stopPipeline(); activeTripId = null; clearPersistedRecording(); break;
-            case FINALIZE_TRIP: finalizeCatalogTrip(effect.tripId, System.currentTimeMillis()); break;
+            case FINALIZE_TRIP: finalizeCatalogTrip(effect.tripId,
+                    effect.endMs >= 0 ? effect.endMs : System.currentTimeMillis()); break;
             case START_CAPTURE:
                 if (effect.tripId == null && coordinator == null) startLiveOnly();
                 break;
@@ -375,10 +385,27 @@ public final class TripVideoService extends Service {
                         TelemetryOverlayModel.Position.valueOf(value.overlayPosition.name()))));
     }
     private long requireStartMs(Intent intent) {
-        if (!intent.hasExtra(VideoContract.EXTRA_START_MS)) throw new IllegalArgumentException("Missing start timestamp");
-        long value = intent.getLongExtra(VideoContract.EXTRA_START_MS, -1);
-        if (value < 0 || value > System.currentTimeMillis() + 300_000) throw new IllegalArgumentException("Invalid start timestamp");
-        return value;
+        return TripTimestamps.requireStart(intent.hasExtra(VideoContract.EXTRA_START_MS),
+                intent.getLongExtra(VideoContract.EXTRA_START_MS, -1), System.currentTimeMillis());
+    }
+    private long requireEndMs(Intent intent, String tripId) {
+        long start = tripId == null ? 0 : getSharedPreferences(PREFERENCES, MODE_PRIVATE)
+                .getLong(START_PREFIX + tripId, 0);
+        return TripTimestamps.requireEnd(intent.hasExtra(VideoContract.EXTRA_END_MS),
+                intent.getLongExtra(VideoContract.EXTRA_END_MS, -1), start, System.currentTimeMillis());
+    }
+    private long recoverReconcileStart(Intent intent, String tripId) {
+        if (intent.hasExtra(VideoContract.EXTRA_START_MS)) {
+            long value = requireStartMs(intent);
+            persistTripStart(tripId, value);
+            return value;
+        }
+        try { return tripStart(tripId); }
+        catch (IllegalStateException missing) {
+            long value = catalog.tripStartMs(tripId);
+            persistTripStart(tripId, value);
+            return value;
+        }
     }
     private void persistTripStart(String tripId, long startMs) {
         if (!getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putLong(START_PREFIX + tripId, startMs).commit())

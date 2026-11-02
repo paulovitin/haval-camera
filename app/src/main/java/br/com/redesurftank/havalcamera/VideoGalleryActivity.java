@@ -89,9 +89,7 @@ public final class VideoGalleryActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Apagar gravações concluídas?")
                 .setMessage("Gravações ativas não serão apagadas.").setNegativeButton("Cancelar", null)
                 .setPositiveButton("Apagar", (dialog, which) -> {
-                    Intent intent = new Intent(this, TripVideoService.class)
-                            .setAction(VideoContract.ACTION_DELETE_LOCAL);
-                    if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(intent); else startService(intent);
+                    startService(new Intent(this, LocalVideoActionService.class));
                 }).show();
     }
     @Override protected void onDestroy() { stopSharing(); super.onDestroy(); }

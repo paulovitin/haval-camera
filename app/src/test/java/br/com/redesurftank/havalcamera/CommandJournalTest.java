@@ -146,6 +146,7 @@ public final class CommandJournalTest {
                 1, "start-1", VideoContract.Command.START_TRIP, "10",
                 editor -> editor.putLong("trip.start.10", 123)));
         assertEquals(0, journal.revision());
+        assertEquals(-1, preferences.getLong("trip.start.10", -1));
         assertEquals(CommandJournal.Outcome.APPLIED, journal.applyStaged(
                 1, "start-1", VideoContract.Command.START_TRIP, "10",
                 editor -> editor.putLong("trip.start.10", 123)).outcome);

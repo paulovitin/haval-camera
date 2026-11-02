@@ -30,6 +30,7 @@
             android:screenOrientation="landscape" />
         <service android:name=".TripVideoService" android:exported="true"
             android:permission="br.com.redesurftank.havalcamera.permission.CONTROL" />
+        <service android:name=".LocalVideoActionService" android:exported="false" />
         <provider android:name=".VideoCatalogProvider"
             android:authorities="br.com.redesurftank.havalcamera.video"
             android:exported="true"

@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /** Durable replay ordering for cross-application commands. */
@@ -42,7 +43,13 @@ public final class CommandJournal {
 
     public synchronized Decision apply(
             long incomingRevision, String requestId, VideoContract.Command command, String tripId) {
+        return applyStaged(incomingRevision, requestId, command, tripId, editor -> { });
+    }
+
+    public synchronized Decision applyStaged(long incomingRevision, String requestId,
+            VideoContract.Command command, String tripId, Consumer<SharedPreferences.Editor> staging) {
         Objects.requireNonNull(command, "command");
+        Objects.requireNonNull(staging, "staging");
         if (!command.journaled) return decision(Outcome.EPHEMERAL, null);
         validateRevision(incomingRevision);
         validateRequestId(requestId);
@@ -89,7 +96,7 @@ public final class CommandJournal {
         Set<String> nextRequestIds = new HashSet<>(requestIds);
         nextRequestIds.add(requestId);
         persistCommands(incomingRevision, nextReconcileRevision,
-                nextActiveTripId, nextLastTripId, nextRequestIds);
+                nextActiveTripId, nextLastTripId, nextRequestIds, staging);
         revision = incomingRevision;
         hasRevision = true;
         reconcileRevision = nextReconcileRevision;
@@ -140,7 +147,8 @@ public final class CommandJournal {
     }
 
     private void persistCommands(long nextRevision, long nextReconcileRevision,
-            String nextActiveTripId, String nextLastTripId, Set<String> nextRequestIds) {
+            String nextActiveTripId, String nextLastTripId, Set<String> nextRequestIds,
+            Consumer<SharedPreferences.Editor> staging) {
         SharedPreferences.Editor editor = preferences.edit()
                 .putLong(STATE_REVISION, nextRevision)
                 .putBoolean(HAS_STATE_REVISION, true)
@@ -150,6 +158,7 @@ public final class CommandJournal {
         else editor.putString(ACTIVE_TRIP_ID, nextActiveTripId);
         if (nextLastTripId == null) editor.remove(LAST_TRIP_ID);
         else editor.putString(LAST_TRIP_ID, nextLastTripId);
+        staging.accept(editor);
         if (!editor.commit()) throw new IllegalStateException("Could not persist command journal");
     }
 
