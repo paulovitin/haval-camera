@@ -93,9 +93,47 @@ public final class VideoCatalogTest {
         }
 
         assertTrue(indexTemporary.delete());
+        catalog.completeTrip("8", 2_000);
+        String repaired = new String(Files.readAllBytes(
+                new File(temporaryFolder.getRoot(), "trip-video/index.json").toPath()),
+                StandardCharsets.UTF_8);
+        assertTrue(repaired.contains("\"completed\":true"));
+
         VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
         recovered.recover();
         assertEquals(1, recovered.completedSnapshot().size());
+    }
+
+    @Test
+    public void promotedSegmentMetadataRecoversAfterTripWriteFailureAndRecordingContinues()
+            throws Exception {
+        VideoCatalog catalog = new VideoCatalog(temporaryFolder.getRoot());
+        catalog.beginTrip("9", 1_000, VideoCatalog.Source.AUTOMATIC);
+        writePartial("9", "one");
+        File tripTemporary = new File(tripDirectory("9"), "trip.json.tmp");
+        assertTrue(tripTemporary.mkdir());
+
+        try {
+            catalog.completeSegment("9",
+                    new VideoCatalog.SegmentMetadata(
+                            1_000, 2_000, 1_000_000, 3, SHA_ONE, AVC));
+            fail("Expected trip metadata write failure");
+        } catch (java.io.IOException expected) {
+            assertTrue(new File(tripDirectory("9"), "000001.mp4").isFile());
+        }
+
+        assertTrue(tripTemporary.delete());
+        VideoCatalog recovered = new VideoCatalog(temporaryFolder.getRoot());
+        recovered.recover();
+        assertEquals(1, recovered.localSnapshot().get(0).segments.size());
+        assertEquals(SHA_ONE, recovered.localSnapshot().get(0).segments.get(0).sha256);
+
+        writePartial("9", "two");
+        recovered.completeSegment("9",
+                new VideoCatalog.SegmentMetadata(
+                        2_000, 3_000, 1_000_000, 3, SHA_TWO, AVC));
+        assertEquals(2, recovered.localSnapshot().get(0).segments.size());
+        assertTrue(new File(tripDirectory("9"), "000002.mp4").isFile());
     }
 
     @Test
