@@ -22,8 +22,8 @@ public final class IpcPermissionContractTest {
         assertTrue(hasPermission(manifest, "permission", VideoContract.CONTROL_PERMISSION));
         assertTrue(hasPermission(manifest, "uses-permission", VideoContract.CONTROL_PERMISSION));
 
-        String service = Files.readString(Path.of(
-                "app/src/main/java/br/com/redesurftank/havalcamera/TripVideoService.java"),
+        String service = new String(Files.readAllBytes(Path.of(
+                "app/src/main/java/br/com/redesurftank/havalcamera/TripVideoService.java")),
                 StandardCharsets.UTF_8);
         assertTrue(service.contains("sendBroadcast(result, VideoContract.CONTROL_PERMISSION);"));
         assertEquals("br.com.redesurftank.havalcamera.permission.CONTROL",
