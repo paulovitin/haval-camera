@@ -134,7 +134,8 @@ public final class VideoSettings {
                 return Quality.valueOf(requiredString(value).toUpperCase());
             case "reserveGb":
                 int reserve = ((Number) value).intValue();
-                if (reserve != 5 && reserve != 10 && reserve != 20) throw new IllegalArgumentException("Unsupported reserve");
+                if (reserve != 1 && reserve != 5 && reserve != 10 && reserve != 20)
+                    throw new IllegalArgumentException("Unsupported reserve");
                 return reserve;
             case "overlayPosition":
                 return OverlayPosition.valueOf(requiredString(value).toUpperCase());
@@ -161,8 +162,9 @@ public final class VideoSettings {
             remoteLive = bool(values, "remoteLive", true);
             remoteDownloads = bool(values, "remoteDownloads", true);
             quality = enumValue(values, "quality", Quality.STANDARD, Quality.class);
-            int reserveGb = number(values, "reserveGb", 5);
-            if (reserveGb != 5 && reserveGb != 10 && reserveGb != 20) reserveGb = 5;
+            int reserveGb = number(values, "reserveGb", 1);
+            if (reserveGb != 1 && reserveGb != 5 && reserveGb != 10 && reserveGb != 20)
+                reserveGb = 1;
             reserveBytes = ((long) reserveGb) << 30;
             automaticDeletion = bool(values, "automaticDeletion", true);
             overlayMaster = bool(values, "overlayMaster", true);

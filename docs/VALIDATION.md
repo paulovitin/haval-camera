@@ -80,6 +80,12 @@ A inspeção confirma que `camera_stream.c` rejeita modos diferentes de `w+` com
 
 Nenhuma correção especulativa de modo, caminho, pipe ou muxer foi aplicada. A gravação continua bloqueada para diagnóstico: é necessário obter, em sessão de hardware separadamente autorizada, o modo e o errno da abertura/escrita que falha, ou fornecer um artefato OEM offline que permita inspecionar a chamada. Nenhum teste/build novo foi executado e nenhum APK novo foi gerado nesta investigação. Os resultados de pacote da correção de startup acima continuam válidos apenas para aquele commit.
 
+### Reserva de armazenamento e erro principal
+
+Evidência posterior da mesma execução confirmou cerca de 2,4 GiB livres com a reserva configurada em 5 GiB. O gate de `SegmentMuxer` recusou a gravação antes de criar `current.partial` com `Reserva de armazenamento indisponível`; a falha posterior `Muxer is closed` substituiu essa causa na notificação. Isso identifica a reserva, e não o modo de dump OEM, como a causa da ausência do arquivo parcial nessa tentativa específica.
+
+A correção mantém 5, 10 e 20 GiB para instalações que já escolheram esses valores, aceita também 1 GiB e usa 1 GiB somente quando `reserveGb` ainda não existe. O reducer mantém a primeira falha do pipeline até um novo início normal limpar o erro. A verificação de software não substitui uma nova gravação física no Android 9; criação, finalização e reprodução de segmentos continuam pendentes no veículo.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 ### Task 1: seleção do Wi-Fi ativo

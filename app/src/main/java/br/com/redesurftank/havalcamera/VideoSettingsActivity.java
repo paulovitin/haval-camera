@@ -71,7 +71,7 @@ public final class VideoSettingsActivity extends BackNavigationActivity implemen
         addToggle(content, "overlayDriveState", "Carimbo: estado de condução");
         addToggle(content, "overlayDecelerationRegen", "Carimbo: desaceleração/regeneração");
         quality = spinner(content, "Qualidade", new String[]{"economy","standard","high"});
-        reserve = spinner(content, "Reserva livre (GB)", new String[]{"5","10","20"});
+        reserve = spinner(content, "Reserva livre (GB)", new String[]{"1","5","10","20"});
         position = spinner(content, "Posição do carimbo", new String[]{"top_left","top_right","bottom_left","bottom_right"});
         Button save = new Button(this); save.setText("Salvar"); save.setOnClickListener(v -> save()); content.addView(save);
         prerelease = new CheckBox(this); prerelease.setText("Receber versões de teste");
@@ -247,7 +247,9 @@ public final class VideoSettingsActivity extends BackNavigationActivity implemen
         toggles.get("overlayDriveState").setChecked(value.overlayDriveState);
         toggles.get("overlayDecelerationRegen").setChecked(value.overlayDecelerationRegen);
         quality.setSelection(value.quality.ordinal());
-        reserve.setSelection(value.reserveBytes == (20L << 30) ? 2 : value.reserveBytes == (10L << 30) ? 1 : 0);
+        reserve.setSelection(value.reserveBytes == (20L << 30) ? 3
+                : value.reserveBytes == (10L << 30) ? 2
+                : value.reserveBytes == (5L << 30) ? 1 : 0);
         position.setSelection(value.overlayPosition.ordinal());
     }
     private void save() {

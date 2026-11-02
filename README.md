@@ -20,7 +20,7 @@ Você precisa de uma central Android ARM64 com o cliente `/vendor/bin/qcarcam_te
 2. Inicie o Shizuku com root, abra **Câmera Haval** e conceda a autorização solicitada.
 3. Mantenha o app aberto para acompanhar o vídeo. **Conectar** tenta reiniciar a captura; **Fechar** encerra a Activity.
 
-O código pede o encerramento da captura quando a Activity sai do primeiro plano. Não há inicialização automática no boot nem gravação de vídeo. Telnet, ADB e um computador foram ferramentas de investigação; o APK instalado não usa esses canais para transportar os quadros.
+O código pede o encerramento da visualização quando a Activity sai do primeiro plano. Não há inicialização automática no boot. Em novas instalações, a gravação reserva 1 GiB livre; **Configurações** permite escolher 1, 5, 10 ou 20 GiB e mantém escolhas explícitas já salvas. Telnet, ADB e um computador foram ferramentas de investigação; o APK instalado não usa esses canais para transportar os quadros.
 
 Na galeria, **Compartilhar na rede local** usa somente o primeiro IPv4 privado da rede Android ativa com transporte Wi-Fi, consultada por `ConnectivityManager` e `LinkProperties`. Não depende do nome da interface e não procura endereços em outras redes. O status mostra Wi-Fi, endereço, porta, código de pareamento e tempo restante. Sem Wi-Fi ativo ou IPv4 privado, mostra o motivo e não abre o portal. As permissões normais `ACCESS_NETWORK_STATE` e `INTERNET` permitem consultar a rede e abrir o socket local; o servidor continua temporário, somente leitura, pareado e ligado exatamente ao endereço selecionado. A validação física com central e telefone na mesma rede permanece pendente em [docs/VALIDATION.md](docs/VALIDATION.md).
 

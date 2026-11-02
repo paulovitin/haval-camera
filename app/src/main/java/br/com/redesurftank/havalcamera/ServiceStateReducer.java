@@ -246,7 +246,8 @@ public final class ServiceStateReducer {
                 break;
             case PIPELINE_FAILED:
                 recording = null; manual = false; parkedRecording = false;
-                viewer = false; lostAt = -1; liveStarted = -1; error = event.detail; break;
+                viewer = false; lostAt = -1; liveStarted = -1;
+                error = old.error == null ? event.detail : old.error; break;
         }
         paused = transfer && viewer;
         Mode mode = recording == null ? (viewer ? Mode.LIVE_ONLY : Mode.IDLE)
