@@ -1,6 +1,7 @@
 package br.com.redesurftank.havalcamera;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -48,7 +49,11 @@ public final class CameraActivity extends Activity {
         Button retry = new Button(this); retry.setText("Conectar");
         retry.setOnClickListener(v -> { stopStream(); startStream(); });
         Button close = new Button(this); close.setText("Fechar"); close.setOnClickListener(v -> finish());
-        actions.addView(retry); actions.addView(close);
+        Button gallery = new Button(this); gallery.setText("Gravações");
+        gallery.setOnClickListener(v -> startActivity(new Intent(this, VideoGalleryActivity.class)));
+        Button settings = new Button(this); settings.setText("Config");
+        settings.setOnClickListener(v -> startActivity(new Intent(this, VideoSettingsActivity.class)));
+        actions.addView(retry); actions.addView(gallery); actions.addView(settings); actions.addView(close);
         layout.addView(actions,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.RIGHT));
         setContentView(layout);
         capture = new CameraCaptureClient(this, this::onCaptureState);

@@ -36,6 +36,8 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     }
 
     private final Listener listener;
+    private final int frameRate;
+    private final int bitRate;
     private final ByteBuffer pendingPixels = ByteBuffer.allocateDirect(CameraPreview.FRAME_SIZE);
     private final FloatBuffer quad = ByteBuffer.allocateDirect(16 * 4)
             .order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -50,7 +52,17 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
     private volatile boolean failureReported;
 
     public EglFrameEncoder(Listener listener) {
+        this(listener, FRAME_RATE, BIT_RATE);
+    }
+
+    public EglFrameEncoder(Listener listener, int frameRate, int bitRate) {
         this.listener = Objects.requireNonNull(listener, "listener");
+        if ((frameRate != 10 && frameRate != 15)
+                || (bitRate != 2_000_000 && bitRate != 4_000_000 && bitRate != 6_000_000)) {
+            throw new IllegalArgumentException("Unsupported encoder preset");
+        }
+        this.frameRate = frameRate;
+        this.bitRate = bitRate;
         quad.put(new float[]{-1,-1,0,1, 1,-1,1,1, -1,1,0,0, 1,1,1,0}).position(0);
     }
 
@@ -64,8 +76,8 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
                 MediaFormat format = MediaFormat.createVideoFormat(MIME, WIDTH, HEIGHT);
                 format.setInteger(MediaFormat.KEY_COLOR_FORMAT,
                         MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-                format.setInteger(MediaFormat.KEY_BIT_RATE, BIT_RATE);
-                format.setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE);
+                format.setInteger(MediaFormat.KEY_BIT_RATE, bitRate);
+                format.setInteger(MediaFormat.KEY_FRAME_RATE, frameRate);
                 format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
                 if (Build.VERSION.SDK_INT >= 30 && info.getCapabilitiesForType(MIME)
                         .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)) {
@@ -92,6 +104,9 @@ public final class EglFrameEncoder implements AutoCloseable, RecordingCoordinato
         }
         throw new IllegalStateException("No hardware AVC surface encoder available", lastFailure);
     }
+
+    public int frameRate() { return frameRate; }
+    public int bitRate() { return bitRate; }
 
     public synchronized void queueFrame(byte[] bgr24, long presentationTimeUs) {
         if (bgr24 == null || bgr24.length != CameraPreview.FRAME_SIZE) {

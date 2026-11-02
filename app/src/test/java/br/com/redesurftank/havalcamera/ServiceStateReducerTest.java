@@ -70,4 +70,13 @@ public final class ServiceStateReducerTest {
         assertTrue(reducer.apply(ServiceStateReducer.Event.stopRecording(9)).stream()
                 .anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.STOP_RECORDING));
     }
+
+    @Test public void parkedLiveRecordingToggleRecordsOnlyAuthenticatedSession() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.settings(1, true, true, true, true, null));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 1_700_000_000_000L));
+        assertEquals(ServiceStateReducer.Mode.RECORDING_LIVE, reducer.state().mode);
+        assertTrue(reducer.state().manualRecording);
+        assertEquals("1700000000000", reducer.state().tripId);
+    }
 }

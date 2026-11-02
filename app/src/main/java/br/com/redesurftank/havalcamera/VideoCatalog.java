@@ -228,6 +228,19 @@ public final class VideoCatalog {
         return snapshot(true);
     }
 
+    /** Resolves only a completed catalog segment; callers never supply a filesystem path. */
+    public synchronized File completedSegmentFile(String tripId, String segmentId) throws IOException {
+        long id = parseTripId(tripId);
+        int ordinal;
+        try { ordinal = Integer.parseInt(segmentId); }
+        catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid segment ID", invalid); }
+        MutableTrip trip = requireTrip(id);
+        if (!trip.completed || ordinal < 1 || ordinal > trip.segments.size()) {
+            throw new IllegalArgumentException("Completed segment not found");
+        }
+        return fixedChild(tripDirectory(id), trip.segments.get(ordinal - 1).fileName);
+    }
+
     private List<Trip> snapshot(boolean completedOnly) {
         List<Trip> snapshot = new ArrayList<>();
         for (MutableTrip trip : trips.values()) {

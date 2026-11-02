@@ -49,4 +49,24 @@ public final class VideoSettingsTest {
                 () -> settings.applyPatch(Map.of("unknown", true)));
         assertEquals(before, settings.snapshot());
     }
+
+    @Test public void everyFeatureToggleAndPresetIsPersisted() {
+        VideoSettings settings = new VideoSettings(new VideoSettings.MemoryStore());
+        VideoSettings.Snapshot value = settings.applyPatch(Map.ofEntries(
+                Map.entry("automaticRecording", false), Map.entry("recordParkedLive", true),
+                Map.entry("remoteLive", false), Map.entry("remoteDownloads", false),
+                Map.entry("automaticDeletion", false), Map.entry("overlayMaster", false),
+                Map.entry("overlayDateTime", false), Map.entry("overlaySpeed", false),
+                Map.entry("overlayAcceleration", false), Map.entry("overlayDriveState", false),
+                Map.entry("overlayDecelerationRegen", false), Map.entry("quality", "high"),
+                Map.entry("reserveGb", 10), Map.entry("overlayPosition", "bottom_right")));
+        assertFalse(value.automaticRecording || value.remoteLive || value.remoteDownloads
+                || value.automaticDeletion || value.overlayMaster || value.overlayDateTime
+                || value.overlaySpeed || value.overlayAcceleration || value.overlayDriveState
+                || value.overlayDecelerationRegen);
+        assertTrue(value.recordParkedLive);
+        assertEquals(VideoSettings.Quality.HIGH, value.quality);
+        assertEquals(10L << 30, value.reserveBytes);
+        assertEquals(VideoSettings.OverlayPosition.BOTTOM_RIGHT, value.overlayPosition);
+    }
 }

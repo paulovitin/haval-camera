@@ -5,6 +5,8 @@ public final class VideoContract {
     public static final int PROTOCOL_VERSION = 1;
     public static final String CONTROL_PERMISSION =
             "br.com.redesurftank.havalcamera.permission.CONTROL";
+    public static final String READ_PERMISSION =
+            "br.com.redesurftank.havalcamera.permission.READ_VIDEO";
 
     private static final String ACTION_PREFIX = "br.com.redesurftank.havalcamera.action.";
     private static final String EXTRA_PREFIX = "br.com.redesurftank.havalcamera.extra.";
@@ -25,6 +27,7 @@ public final class VideoContract {
     // Same-package UI contracts are intentionally not part of the exported EcoTrip API.
     static final String ACTION_START_MANUAL_RECORDING = ACTION_PREFIX + "START_MANUAL_RECORDING";
     static final String ACTION_STOP_MANUAL_RECORDING = ACTION_PREFIX + "STOP_MANUAL_RECORDING";
+    static final String ACTION_REFRESH_SETTINGS = ACTION_PREFIX + "REFRESH_SETTINGS";
 
     public static final String EXTRA_PROTOCOL_VERSION = EXTRA_PREFIX + "PROTOCOL_VERSION";
     public static final String EXTRA_REQUEST_ID = EXTRA_PREFIX + "REQUEST_ID";

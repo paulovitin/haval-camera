@@ -1,5 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <permission android:name="br.com.redesurftank.havalcamera.permission.CONTROL"
+        android:protectionLevel="signature" />
+    <permission android:name="br.com.redesurftank.havalcamera.permission.READ_VIDEO"
+        android:protectionLevel="signature" />
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
     <application android:label="Câmera Haval" android:allowBackup="false"
         android:extractNativeLibs="true"
@@ -17,5 +22,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".VideoGalleryActivity" android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity android:name=".VideoPlaybackActivity" android:exported="false"
+            android:screenOrientation="landscape" />
+        <activity android:name=".VideoSettingsActivity" android:exported="false"
+            android:screenOrientation="landscape" />
+        <service android:name=".TripVideoService" android:exported="true"
+            android:permission="br.com.redesurftank.havalcamera.permission.CONTROL" />
+        <provider android:name=".VideoCatalogProvider"
+            android:authorities="br.com.redesurftank.havalcamera.video"
+            android:exported="true"
+            android:readPermission="br.com.redesurftank.havalcamera.permission.READ_VIDEO"
+            android:writePermission="br.com.redesurftank.havalcamera.permission.CONTROL" />
     </application>
 </manifest>

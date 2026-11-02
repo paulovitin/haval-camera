@@ -53,7 +53,7 @@ public final class LocalShareServerTest {
         String cookie = session.pair("10.0.0.2", "123456", 1_001).cookie;
         assertEquals(404, session.download(
                 "10.0.0.2", cookie, "8", "1", null, 1_002).status);
-        assertEquals(400, LocalShareServer.parseRequest(new byte[20_000]).status);
+        assertEquals(400, LocalShareServer.parseRequest(new byte[20_000]).error.status);
         assertFalse(LocalShareServer.isPrivateWifiAddress("0.0.0.0"));
         assertFalse(LocalShareServer.isPrivateWifiAddress("8.8.8.8"));
         assertTrue(LocalShareServer.isPrivateWifiAddress("192.168.1.2"));

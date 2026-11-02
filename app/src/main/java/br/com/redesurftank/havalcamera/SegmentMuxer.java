@@ -19,6 +19,7 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
     public interface FailureListener {
         void onFailure(Throwable failure);
     }
+    public interface SegmentGate { void beforeSegment() throws Exception; }
 
     private static final Object STOP = new Object();
     private final VideoCatalog catalog;
@@ -26,6 +27,7 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
     private final File partial;
     private final VideoCatalog.Codec codecMetadata;
     private final FailureListener failures;
+    private final SegmentGate segmentGate;
     private final BlockingQueue<Object> queue = new ArrayBlockingQueue<>(120);
     private final SegmentRotationPolicy rotation = new SegmentRotationPolicy();
     private final Thread worker;
@@ -44,8 +46,26 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
             String tripId,
             VideoCatalog catalog,
             FailureListener failures) throws IOException {
+        this(filesDirectory, tripId, catalog, failures,
+                EglFrameEncoder.FRAME_RATE, EglFrameEncoder.BIT_RATE, () -> { });
+    }
+
+    public SegmentMuxer(
+            File filesDirectory,
+            String tripId,
+            VideoCatalog catalog,
+            FailureListener failures,
+            int frameRate,
+            int bitRate) throws IOException {
+        this(filesDirectory, tripId, catalog, failures, frameRate, bitRate, () -> { });
+    }
+
+    public SegmentMuxer(
+            File filesDirectory, String tripId, VideoCatalog catalog, FailureListener failures,
+            int frameRate, int bitRate, SegmentGate segmentGate) throws IOException {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.failures = Objects.requireNonNull(failures, "failures");
+        this.segmentGate = Objects.requireNonNull(segmentGate, "segmentGate");
         if (tripId == null || !tripId.matches("[0-9]+")) {
             throw new IllegalArgumentException("Invalid numeric trip ID");
         }
@@ -61,8 +81,8 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
                 EglFrameEncoder.MIME,
                 EglFrameEncoder.WIDTH,
                 EglFrameEncoder.HEIGHT,
-                EglFrameEncoder.FRAME_RATE,
-                EglFrameEncoder.BIT_RATE);
+                frameRate,
+                bitRate);
         worker = new Thread(this::workLoop, "CameraSegmentMuxer");
         worker.start();
     }
@@ -97,7 +117,7 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
         }
     }
 
-    private void writeOnWorker(EncodedAccessUnit unit) throws IOException {
+    private void writeOnWorker(EncodedAccessUnit unit) throws Exception {
         if (outputFormat == null) throw new IllegalStateException("Codec format is not known");
         if (muxer == null) {
             if (!unit.keyframe) return;
@@ -118,6 +138,9 @@ public final class SegmentMuxer implements RecordingCoordinator.Sink {
     }
 
     private void openSegment(long firstPtsUs) throws IOException {
+        try { segmentGate.beforeSegment(); }
+        catch (IOException failure) { throw failure; }
+        catch (Exception failure) { throw new IOException("Storage reserve check failed", failure); }
         if (!partial.getParentFile().isDirectory()) {
             throw new IOException("Trip directory does not exist");
         }
