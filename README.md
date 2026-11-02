@@ -26,7 +26,7 @@ O código pede o encerramento da captura quando a Activity sai do primeiro plano
 
 **Não execute builds Android, Gradle, Kotlin ou Xcode no coordenador.** Use um commit Git imutável e auditado no Mac Mini autorizado. Não envie arquivos não commitados, credenciais, keystores, caches ou logs; não use build local como fallback. O CI existente comprova somente o baseline do build manual anterior, não esta migração Gradle nem a câmera física.
 
-A migração ainda precisa de bootstrap no Mac Mini: o wrapper incluído veio do commit oficial do Gradle 8.14.3, com JAR conferido pelo SHA-256 publicado, mas ainda não foi regenerado no Mini. `gradle/verification-metadata.xml` contém checksums iniciais, incluindo os quatro AARs Shizuku já auditados; **ainda não contém todo o grafo transitivo do AGP**. Um build normal deve falhar com verificação estrita enquanto esse bootstrap não for concluído. Não desative a verificação e não gere checksums automaticamente no CI.
+O wrapper foi regenerado no Mac Mini autorizado com Gradle 8.14.3; o JAR manteve o SHA-256 oficial `7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172`. `gradle/verification-metadata.xml` cobre o grafo resolvido por testes, debug e release, incluindo os quatro AARs Shizuku já auditados. A verificação final executou teste unitário, debug, release, assinatura, alinhamento e integridade do ZIP no Mini. Não desative a verificação e não gere checksums automaticamente no CI.
 
 No Mac Mini, use JDK 17 para executar Gradle 8.14.3/AGP 8.12.1; o código Java é compilado para Java 11. Instale os componentes fixados:
 
@@ -37,7 +37,7 @@ export ANDROID_HOME=/caminho/para/android-sdk
 
 O projeto também aceita `ANDROID_SDK_ROOT`; no macOS, o script usa `$HOME/Library/Android/sdk` como padrão. Compile SDK 36, min/target SDK 28 e ABI `arm64-v8a` permanecem fixos. Como o APK é específico para instalação direta na central e não para o Google Play, somente o lint `ExpiredTargetSdkVersion` fica desativado; os demais continuam ativos. Java, AIDL e `app/src/main/cpp/CMakeLists.txt` mantêm os diretórios existentes; JNI usa extração legada para o `LD_PRELOAD`.
 
-Para concluir o bootstrap **apenas no Mac Mini autorizado**, gere o wrapper e os metadados com o Gradle 8.14.3 confiável. Os comandos de geração abaixo não são evidência de um build verificado:
+Ao alterar wrapper ou dependências, regenere os metadados **apenas no Mac Mini autorizado** com o Gradle 8.14.3 confiável. Os comandos de geração não são evidência de um build verificado:
 
 ```sh
 ./gradlew --no-daemon --write-verification-metadata sha256 wrapper --gradle-version 8.14.3 --distribution-type bin --gradle-distribution-sha256-sum bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531
@@ -46,7 +46,7 @@ Para concluir o bootstrap **apenas no Mac Mini autorizado**, gere o wrapper e os
 
 Revise o diff do wrapper e cada novo checksum contra a origem oficial; não aceite alterações nos quatro checksums Shizuku existentes. Commit os metadados completos e o wrapper antes da verificação final em um novo snapshot auditado. O catálogo de versões fica em `gradle/libs.versions.toml`. A verificação inclui POMs/metadados e artefatos, sem exceções globais.
 
-Depois do bootstrap, execute no Mac Mini:
+Depois de qualquer mudança, execute no Mac Mini:
 
 ```sh
 ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
@@ -57,7 +57,7 @@ O teste `BuildSmokeTest.existingFrameSizeIsStable()` fixa 1760 × 720 e 3.801.60
 
 Builds debug usam a assinatura debug do Gradle. Sem variáveis de assinatura, o APK de teste gerado pelo script também usa essa chave, normalmente em `$HOME/.android/debug.keystore`; ele não reutiliza automaticamente o antigo `build/debug.keystore`. Para assinar atualizações com uma chave existente, defina **todas** as variáveis `CAMERA_KEYSTORE`, `CAMERA_KEY_ALIAS`, `CAMERA_STORE_PASS` e `CAMERA_KEY_PASS`. Configuração parcial ou keystore inexistente causa erro, sem imprimir senhas. Nunca publique o keystore. Assinatura de release não é suportada pela fila padrão do Mini: qualquer execução assinada com certificado aprovado exige o fluxo autorizado, sem enviar segredos no arquivo-fonte.
 
-O workflow instala as versões fixadas, executa os testes antes do script e publica somente `build/haval-camera.apk`. As actions permanecem fixadas por SHA. Um resultado do CI não valida a câmera do carro nem substitui a verificação pendente no Mac Mini.
+O workflow instala as versões fixadas, executa os testes antes do script e publica somente `build/haval-camera.apk`. As actions permanecem fixadas por SHA. Um resultado do CI não valida a câmera do carro nem substitui os gates físicos pendentes.
 
 ## Usar em outros aplicativos
 
