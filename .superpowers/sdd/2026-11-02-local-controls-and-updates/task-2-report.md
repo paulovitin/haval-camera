@@ -165,3 +165,59 @@ finished=2026-11-02T23:06:37Z rc=0
 GREEN log SHA-256: `e68b0d21d7cf7410878a61e38d5b60903767507aaa513e34f265786d47cbd95d`. Fetched release APK SHA-256: `9da1173126e623bdd8f853a9f252711949f718588268a51a448b20d89aed948d`. The full JVM suite, debug build, release build, lint vital, release signer check, ZIP alignment, and ZIP integrity passed in the authorized queue; the known annotation/deprecation/manifest warnings remain.
 
 **Self-review and limits:** `git diff ac855ce..6dc12e3 --check` passed. All four current screens call `setContentView(View)`, the final base method inserts exactly one Back button before their content, and `configureBack` attaches only a finish callback. The gallery renderer again retains its original five static children; no Task 1 Wi-Fi selection or sharing code changed. No local build, new dependency, source-text UI test, controller-ledger edit, or subagent dispatch occurred. The contract is limited to the current `setContentView(View)` path. The Android `Button` and layout remain unexecuted by JVM tests; Task 5 must inspect visibility, touch, and service continuity on the Android 9 unit.
+
+## Fix round 2 — compiled production call path
+
+**Status: DONE_WITH_CONCERNS.** The existing Gradle JVM test stack cannot instantiate Android `Activity`, `Button`, or layout views without an Android runtime or a new test dependency. The new checks inspect the compiled production `.class` files with the existing JDK 17 `javap`, not source text. They check that each Activity's `onCreate` calls `setContentView(View)`, the final wrapper calls `ActivityNavigation.backButton` before a `LinearLayout.addView` call and installs the root, and `backButton(Activity)` calls `configureBack`. They also check the compiled adapter's `Button.setText` and `Button.setOnClickListener` calls, `configureBack`'s `Voltar` label and `backClick` call, and the factory class's `Activity.finish` method handle. The existing JVM listener test executes the configured click. This is a structural call-path contract; it does not prove operand-level data flow, execute Android UI, or prove physical visibility, touch response, or recording continuity.
+
+To prove the checks can fail, the RED commit deliberately removed the wrapper's button insertion and changed `backButton(Activity)` to call `Activity.recreate()` directly. The queue ran 142 JVM tests and failed exactly the two new bytecode checks. The GREEN commit restored the original production code with the checks retained; the authorized queue then passed. The final source diff for this round contains only the test additions. No dependency, controller ledger, or other production behavior remains changed by this round.
+
+**Commits:** `61246fc18ae9d2706c2fc7b100102e05584ecddf` (RED mutation and tests); `48bae5c3026b2215837075911b845295334e70ac` (GREEN restoration).
+
+**RED commands and output:**
+
+```text
+git push origin HEAD:codex/continuous-trip-video-impl
+/usr/local/bin/mac-mini-build submit-git /root/projects/haval-camera android-camera-verify 61246fc
+content_files_scanned=90
+job=haval-camera-61246fc18ae9d270-20261102T231123Z-22631 pid=30297 state=queued
+archive_sha256=862bd5808fc4518f0675cd7d0d0564b1c2e17c2ed1d6698e06f4e668cb720dcc
+/usr/local/bin/mac-mini-build status haval-camera-61246fc18ae9d270-20261102T231123Z-22631
+state=failed
+ActivityNavigationTest > compiledFactoryConnectsVoltarToActivityFinish FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:36
+ActivityNavigationTest > compiledScreenLayoutsInstallTheBackButton FAILED
+    java.lang.AssertionError at ActivityNavigationTest.java:23
+142 tests completed, 2 failed
+BUILD FAILED in 14s
+finished=2026-11-02T23:11:41Z rc=1
+/usr/local/bin/mac-mini-build fetch haval-camera-61246fc18ae9d270-20261102T231123Z-22631 /root/projects/haval-camera/.artifacts/back-navigation-fix2-red-61246fc
+./build.log: OK
+```
+
+RED build-log SHA-256: `11932bceff3e8e050d283ec6f49dba861995946e8a457dc178dfc44caac255ac`.
+
+**GREEN commands and output:**
+
+```text
+git push origin HEAD:codex/continuous-trip-video-impl
+/usr/local/bin/mac-mini-build submit-git /root/projects/haval-camera android-camera-verify 48bae5c
+content_files_scanned=90
+job=haval-camera-48bae5c3026b2215-20261102T231202Z-2852 pid=31365 state=queued
+archive_sha256=4481cbf359975d8bbbc8b36fb6a16790ff26be2b916ca74ba46fd7325a86bec0
+/usr/local/bin/mac-mini-build status haval-camera-48bae5c3026b2215-20261102T231202Z-2852
+state=success
+> Task :app:testDebugUnitTest
+> Task :app:assembleDebug
+BUILD SUCCESSFUL in 20s
+> Task :app:lintVitalRelease
+> Task :app:assembleRelease
+BUILD SUCCESSFUL in 17s
+No errors detected in compressed data of /Users/consorciolimpagyn/BuildQueue/work/haval-camera-48bae5c3026b2215-20261102T231202Z-2852/source/build/haval-camera.apk.
+finished=2026-11-02T23:12:44Z rc=0
+/usr/local/bin/mac-mini-build fetch haval-camera-48bae5c3026b2215-20261102T231202Z-2852 /root/projects/haval-camera/.artifacts/back-navigation-fix2-green-48bae5c
+./build.log: OK
+./haval-camera.apk: OK
+```
+
+GREEN build-log SHA-256: `adce5febfae80d560c7a5a3d8c5a66d2c46c9b0ff208700894126f5d15fab308`; release APK SHA-256: `6daba7d44a3bd09e3de5a11c47d5144ef21b2f1280be4aa516c9c53cb951687f`. The queue completed the unit suite, debug build, release build, lint vital, signature pin, alignment, and ZIP integrity checks. Existing annotation, deprecated-API, and manifest warnings remain. `git diff b2ee151..48bae5c --check` passed. No local Android build or subagent ran.
