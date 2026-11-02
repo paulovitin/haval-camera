@@ -52,7 +52,8 @@ public final class ActivityNavigationTest {
     @Test public void compiledFactoryConnectsVoltarToActivityFinish() throws Exception {
         String bytecode = disassemble(ActivityNavigation.class);
         String factory = methodCode(bytecode, "backButton(");
-        assertTrue(factory.contains("configureBack:"));
+        assertEquals("factory must configure the Button once", 1,
+                instructions(factory).stream().filter(line -> line.contains("configureBack:")).count());
         String adapter = methodCode(bytecode, "lambda$backButton$");
         assertTrue(adapter.contains("Button.setText:"));
         assertTrue(adapter.contains("Button.setOnClickListener:"));

@@ -10,10 +10,12 @@ public final class ActivityNavigation {
 
     public static Button backButton(Activity activity) {
         Button button = new Button(activity);
-        configureBack(activity::finish, (label, click) -> {
+        BiConsumer<String, View.OnClickListener> install = (label, click) -> {
             button.setText(label);
             button.setOnClickListener(click);
-        });
+        };
+        configureBack(activity::finish, install);
+        configureBack(activity::finish, install);
         return button;
     }
 
