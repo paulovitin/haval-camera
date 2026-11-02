@@ -27,6 +27,8 @@ public final class LocalShareServer implements AutoCloseable {
     private final ServerSocket socket;
     private final Session session;
     private final Thread worker;
+    private final Thread expiryWorker;
+    private volatile Socket activeClient;
 
     public LocalShareServer(InetAddress wifiAddress, File filesDirectory, VideoCatalog catalog)
             throws IOException {
@@ -45,7 +47,11 @@ public final class LocalShareServer implements AutoCloseable {
         socket.bind(new InetSocketAddress(wifiAddress, 0), 1);
         socket.setSoTimeout(1_000);
         worker = new Thread(this::acceptLoop, "CameraLocalShare");
-        worker.start();
+        expiryWorker = new Thread(() -> {
+            try { Thread.sleep(LIFETIME_MS); } catch (InterruptedException ignored) { return; }
+            close();
+        }, "CameraLocalShareExpiry");
+        expiryWorker.setDaemon(true); worker.start(); expiryWorker.start();
     }
 
     public String pairingCode() { return session.code; }
@@ -55,10 +61,12 @@ public final class LocalShareServer implements AutoCloseable {
     private void acceptLoop() {
         while (!session.isClosed()) {
             try (Socket client = socket.accept()) {
+                activeClient = client;
                 client.setSoTimeout(5_000);
                 Response response = handle(readBounded(client.getInputStream()),
                         client.getInetAddress().getHostAddress(), System.currentTimeMillis());
                 write(client.getOutputStream(), response);
+                activeClient = null;
             } catch (SocketTimeoutException timeout) {
                 if (System.currentTimeMillis() >= session.expiresAtMs) close();
             } catch (IOException failure) {
@@ -74,7 +82,7 @@ public final class LocalShareServer implements AutoCloseable {
         if (request.path.startsWith("/pair?code="))
             return session.pair(client, request.path.substring(11), now);
         String cookie = request.cookie;
-        if ("/".equals(request.path)) return session.list(client, cookie, now);
+        if ("/".equals(request.path)) return session.portal(client, cookie, now);
         Matcher matcher = Pattern.compile("/trip/([0-9]+)/segment/([0-9]+)").matcher(request.path);
         if (matcher.matches()) return session.download(client, cookie, matcher.group(1),
                 matcher.group(2), request.range, now);
@@ -126,6 +134,7 @@ public final class LocalShareServer implements AutoCloseable {
                 + (response.cookie == null ? "" : "\r\nSet-Cookie: haval_camera=" + response.cookie
                     + "; HttpOnly; SameSite=Strict")
                 + (response.contentRange == null ? "" : "\r\nContent-Range: " + response.contentRange)
+                + (response.location == null ? "" : "\r\nLocation: " + response.location)
                 + "\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n";
         output.write(headers.getBytes(StandardCharsets.US_ASCII));
         output.write(response.body);
@@ -133,7 +142,7 @@ public final class LocalShareServer implements AutoCloseable {
     }
 
     private static String reason(int status) {
-        switch (status) { case 200: return "OK"; case 206: return "Partial Content";
+        switch (status) { case 200: return "OK"; case 206: return "Partial Content"; case 303: return "See Other";
             case 400: return "Bad Request"; case 401: return "Unauthorized";
             case 403: return "Forbidden"; case 404: return "Not Found";
             case 410: return "Gone"; case 416: return "Range Not Satisfiable";
@@ -151,7 +160,10 @@ public final class LocalShareServer implements AutoCloseable {
 
     @Override public void close() {
         session.close();
+        Socket client = activeClient;
+        if (client != null) try { client.close(); } catch (IOException ignored) { }
         try { socket.close(); } catch (IOException ignored) { }
+        if (Thread.currentThread() != expiryWorker) expiryWorker.interrupt();
     }
 
     interface TokenSource { String create(int bytes); }
@@ -181,7 +193,16 @@ public final class LocalShareServer implements AutoCloseable {
             if (client != null && !client.equals(address)) return Response.text(403, "One client only");
             client = address; cookie = tokens.create(16);
             if (cookie == null || !cookie.matches("[0-9a-f]{32}")) throw new IllegalStateException("Invalid token source");
-            return new Response(200, "Paired".getBytes(StandardCharsets.UTF_8), "text/plain", cookie, null);
+            return new Response(303, new byte[0], "text/plain", cookie, null, "/");
+        }
+        synchronized Response portal(String address, String suppliedCookie, long now) {
+            Response unavailable = unavailable(now); if (unavailable != null) return unavailable;
+            if (cookie != null && cookie.equals(suppliedCookie) && client.equals(address))
+                return list(address, suppliedCookie, now);
+            byte[] form = ("<!doctype html><meta charset=utf-8><title>Haval Camera</title>"
+                    + "<form action=/pair method=get><label>Código <input name=\"code\" inputmode=numeric maxlength=6></label>"
+                    + "<button>Conectar</button></form>").getBytes(StandardCharsets.UTF_8);
+            return new Response(200, form, "text/html; charset=utf-8", null, null, null);
         }
         synchronized Response list(String address, String suppliedCookie, long now) {
             Response auth = authorize(address, suppliedCookie, now); if (auth != null) return auth;
@@ -191,13 +212,13 @@ public final class LocalShareServer implements AutoCloseable {
                         .append(segment.segmentId).append("\">Viagem ").append(trip.tripId)
                         .append(" - segmento ").append(segment.segmentId).append("</a></li>");
             return new Response(200, html.append("</ul>").toString().getBytes(StandardCharsets.UTF_8),
-                    "text/html; charset=utf-8", null, null);
+                    "text/html; charset=utf-8", null, null, null);
         }
         synchronized Response download(String address, String suppliedCookie, String tripId,
                 String segmentId, String range, long now) {
             Response auth = authorize(address, suppliedCookie, now); if (auth != null) return auth;
             if (!tripId.matches("[0-9]+") || !segmentId.matches("[0-9]+")) return Response.text(400, "Invalid ID");
-            try {
+            try (VideoCatalog.ReadLease ignored = catalog.acquireReadLease(tripId)) {
                 File file = catalog.completedSegmentFile(tripId, segmentId);
                 File canonical = file.getCanonicalFile();
                 if (!canonical.isFile() || !canonical.getPath().startsWith(filesDirectory.getPath() + File.separator))
@@ -225,7 +246,7 @@ public final class LocalShareServer implements AutoCloseable {
                     if (offset != length) return Response.text(404, "Not found");
                 }
                 return new Response(range == null ? 200 : 206, body, "video/mp4", null,
-                        range == null ? null : "bytes " + start + "-" + end + "/" + canonical.length());
+                        range == null ? null : "bytes " + start + "-" + end + "/" + canonical.length(), null);
             } catch (IllegalArgumentException | IllegalStateException | IOException invalid) {
                 return Response.text(404, "Not found");
             }
@@ -254,12 +275,13 @@ public final class LocalShareServer implements AutoCloseable {
     public static final class Response {
         public final int status; public final byte[] body; public final String contentType;
         public final String cookie; public final String contentRange;
-        Response(int status, byte[] body, String contentType, String cookie, String contentRange) {
+        public final String location;
+        Response(int status, byte[] body, String contentType, String cookie, String contentRange, String location) {
             this.status=status; this.body=body; this.contentType=contentType;
-            this.cookie=cookie; this.contentRange=contentRange;
+            this.cookie=cookie; this.contentRange=contentRange; this.location=location;
         }
         static Response text(int status, String text) {
-            return new Response(status, text.getBytes(StandardCharsets.UTF_8), "text/plain; charset=utf-8", null, null);
+            return new Response(status, text.getBytes(StandardCharsets.UTF_8), "text/plain; charset=utf-8", null, null, null);
         }
     }
 

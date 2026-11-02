@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.media.MediaFormat;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -25,6 +26,7 @@ public final class TripVideoService extends Service {
     private static final String PREFERENCES = "trip-video-journal";
     private static final String ACTIVE_ID = "service.activeTripId";
     private static final String ACTIVE_MANUAL = "service.activeManual";
+    private static final String START_PREFIX = "service.tripStart.";
     private final ServiceStateReducer reducer = new ServiceStateReducer();
     private final TelemetryOverlayModel telemetry = new TelemetryOverlayModel();
     private VideoCatalog catalog;
@@ -35,11 +37,14 @@ public final class TripVideoService extends Service {
     private SegmentMuxer muxer;
     private RecordingCoordinator coordinator;
     private String activeTripId;
+    private final FrameRouter frames = new FrameRouter();
+    private boolean captureRunning;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             try { apply(ServiceStateReducer.Event.tick(nextSequence(), System.currentTimeMillis())); }
             catch (Exception failure) { fail(failure.getMessage()); }
+            updateOverlay();
             main.postDelayed(this, 1_000);
         }
     };
@@ -53,8 +58,12 @@ public final class TripVideoService extends Service {
             settings = VideoSettings.from(this);
             journal = new CommandJournal(getSharedPreferences(PREFERENCES, MODE_PRIVATE));
             capture = new CameraCaptureClient(this, (state, detail) -> {
-                if (state == CameraCaptureClient.State.ERROR) fail(detail);
+                if (state == CameraCaptureClient.State.ERROR) pipelineFailure(new IOException(detail));
             });
+            VideoSettings.Snapshot initial = settings.snapshot();
+            apply(ServiceStateReducer.Event.settings(nextSequence(), initial.automaticRecording,
+                    initial.recordParkedLive, initial.remoteLive, initial.remoteDownloads,
+                    journal.activeTripId()));
             android.content.SharedPreferences serviceState = getSharedPreferences(PREFERENCES, MODE_PRIVATE);
             boolean hasServiceRecording = serviceState.contains(ACTIVE_ID);
             String recovered = hasServiceRecording ? serviceState.getString(ACTIVE_ID, null)
@@ -83,15 +92,19 @@ public final class TripVideoService extends Service {
             apply(ServiceStateReducer.Event.settings(nextSequence(), value.automaticRecording,
                     value.recordParkedLive, value.remoteLive, value.remoteDownloads,
                     journal.activeTripId()));
+            updateOverlay();
             return;
         }
+        if (VideoContract.ACTION_DELETE_LOCAL.equals(action)) { deleteCompleted(); return; }
         if (VideoContract.ACTION_START_MANUAL_RECORDING.equals(action)) {
+            if (reducer.state().tripId != null || reducer.state().authoritativeTripId != null) return;
             long start = intent.getLongExtra(VideoContract.EXTRA_START_MS, System.currentTimeMillis());
+            persistTripStart(Long.toString(start), start);
             apply(ServiceStateReducer.Event.startManual(Long.toString(start), nextSequence()));
             return;
         }
         if (VideoContract.ACTION_STOP_MANUAL_RECORDING.equals(action)) {
-            finishCurrent(intent.getLongExtra(VideoContract.EXTRA_END_MS, System.currentTimeMillis()), false);
+            apply(ServiceStateReducer.Event.stopManual(nextSequence()));
             return;
         }
         if (VideoContract.ACTION_TELEMETRY_SAMPLE.equals(action)) {
@@ -110,17 +123,24 @@ public final class TripVideoService extends Service {
         switch (command) {
             case START_TRIP:
             case RECONCILE:
-                if (decision.previousTripId != null && !decision.previousTripId.equals(tripId))
-                    finishTrip(decision.previousTripId, System.currentTimeMillis(), false);
-                if (tripId == null) finishCurrent(System.currentTimeMillis(), false);
-                else if (settings.snapshot().automaticRecording)
+                if (decision.previousTripId != null && !decision.previousTripId.equals(tripId)) {
+                    apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
+                }
+                if (tripId == null) {
+                    if (decision.previousTripId != null)
+                        apply(ServiceStateReducer.Event.stopAutomatic(decision.previousTripId, nextSequence()));
+                } else {
+                    long startMs = requireStartMs(intent);
+                    persistTripStart(tripId, startMs);
                     apply(ServiceStateReducer.Event.startAutomatic(tripId, nextSequence()));
+                }
                 break;
             case STOP_TRIP:
-                finishTrip(tripId, intent.getLongExtra(VideoContract.EXTRA_END_MS, System.currentTimeMillis()), false);
+                apply(ServiceStateReducer.Event.stopAutomatic(tripId, nextSequence()));
                 break;
             case DISCARD_TRIP:
-                finishTrip(tripId, System.currentTimeMillis(), true);
+                apply(ServiceStateReducer.Event.stopAutomatic(tripId, nextSequence()));
+                discardCompletedOrActive(tripId);
                 break;
             case START_LIVE:
                 apply(ServiceStateReducer.Event.viewerConnected(nextSequence(), System.currentTimeMillis()));
@@ -160,6 +180,7 @@ public final class TripVideoService extends Service {
                 break;
             case PAUSE_RECORDING:
                 stopPipeline(); activeTripId = null; clearPersistedRecording(); break;
+            case FINALIZE_TRIP: finalizeCatalogTrip(effect.tripId, System.currentTimeMillis()); break;
             case START_CAPTURE:
                 if (effect.tripId == null && coordinator == null) startLiveOnly();
                 break;
@@ -174,10 +195,11 @@ public final class TripVideoService extends Service {
     private void startRecording(String tripId, boolean manual) throws Exception {
         if (tripId.equals(activeTripId) && coordinator != null) return;
         stopPipeline();
-        try { catalog.beginTrip(tripId, Long.parseLong(tripId),
+        long startMs = tripStart(tripId);
+        try { catalog.beginTrip(tripId, startMs,
                 manual ? VideoCatalog.Source.MANUAL : VideoCatalog.Source.AUTOMATIC); }
         catch (IllegalStateException existing) {
-            boolean found = catalog.localSnapshot().stream().anyMatch(trip -> trip.tripId == Long.parseLong(tripId) && !trip.completed);
+            boolean found = catalog.localSnapshot().stream().anyMatch(trip -> Long.toString(trip.tripId).equals(tripId) && !trip.completed);
             if (!found) throw existing;
         }
         VideoSettings.Snapshot selected = settings.snapshot();
@@ -200,11 +222,13 @@ public final class TripVideoService extends Service {
             throw new IllegalStateException("Could not persist active recording");
         }
         encoder.start();
+        updateOverlay();
         long origin = System.nanoTime();
-        capture.start(frame -> {
+        frames.setEncoder(frame -> {
             EglFrameEncoder current = encoder;
             if (current != null) current.queueFrame(frame, (System.nanoTime() - origin) / 1_000);
         });
+        ensureCapture();
     }
 
     private void startLiveOnly() throws Exception {
@@ -221,30 +245,20 @@ public final class TripVideoService extends Service {
         }, fps, bitrate);
         coordinator = new RecordingCoordinator(discard, capture::stop, encoder, this::pipelineFailure);
         encoder.start();
+        updateOverlay();
         long origin = System.nanoTime();
-        capture.start(frame -> { if (encoder != null) encoder.queueFrame(frame, (System.nanoTime()-origin)/1_000); });
-    }
-
-    private void finishCurrent(long endMs, boolean discard) throws Exception {
-        if (activeTripId != null) finishTrip(activeTripId, endMs, discard);
-    }
-
-    private void finishTrip(String tripId, long endMs, boolean discard) throws Exception {
-        if (tripId == null || !tripId.equals(activeTripId)) return;
-        stopPipeline();
-        if (discard) catalog.discardTrip(tripId); else catalog.completeTrip(tripId, endMs);
-        activeTripId = null;
-        clearPersistedRecording();
-        apply(ServiceStateReducer.Event.stopRecording(nextSequence()));
+        frames.setEncoder(frame -> { if (encoder != null) encoder.queueFrame(frame, (System.nanoTime()-origin)/1_000); });
+        ensureCapture();
     }
 
     private void stopPipeline() {
-        capture.stop();
+        frames.setEncoder(null);
         EglFrameEncoder oldEncoder = encoder; encoder = null;
         if (oldEncoder != null) oldEncoder.close();
         RecordingCoordinator oldCoordinator = coordinator; coordinator = null;
         if (oldCoordinator != null) oldCoordinator.close();
         muxer = null;
+        stopCaptureIfUnused();
     }
 
     private void clearPersistedRecording() {
@@ -262,18 +276,14 @@ public final class TripVideoService extends Service {
                 intent.getFloatExtra(VideoContract.EXTRA_SPEED_KMH, Float.NaN),
                 intent.getFloatExtra(VideoContract.EXTRA_MOTOR_POWER_KW, Float.NaN),
                 intent.getIntExtra(VideoContract.EXTRA_VALIDITY_FLAGS, 0), now) && encoder != null) {
-            VideoSettings.Snapshot value = settings.snapshot();
-            encoder.setOverlaySnapshot(telemetry.snapshot(now, System.currentTimeMillis(),
-                    new TelemetryOverlayModel.Settings(value.overlayMaster, value.overlayDateTime,
-                            value.overlaySpeed, value.overlayAcceleration, value.overlayDriveState,
-                            value.overlayDecelerationRegen,
-                            TelemetryOverlayModel.Position.valueOf(value.overlayPosition.name()))));
+            updateOverlay();
         }
     }
 
     private void deleteCompleted() throws IOException {
         if (reducer.state().transferActive) throw new IOException("Transferência ativa");
-        for (VideoCatalog.Trip trip : catalog.completedSnapshot()) catalog.discardTrip(Long.toString(trip.tripId));
+        for (VideoCatalog.Trip trip : catalog.completedSnapshot())
+            if (!catalog.leasedTripIds().contains(trip.tripId)) catalog.discardTrip(Long.toString(trip.tripId));
     }
 
     private void enforceStorageReserve() throws IOException {
@@ -286,7 +296,7 @@ public final class TripVideoService extends Service {
         }
         RetentionPlanner.Plan plan = RetentionPlanner.selectDeletions(entries,
                 getFilesDir().getUsableSpace(), value.reserveBytes, value.automaticDeletion,
-                activeTripId == null ? null : Long.parseLong(activeTripId), Collections.emptyList());
+                activeTripId == null ? null : Long.parseLong(activeTripId), catalog.leasedTripIds());
         for (Long tripId : plan.tripIds) catalog.discardTrip(Long.toString(tripId));
         if (!plan.recordingMayContinue) throw new IOException("Reserva de armazenamento indisponível");
     }
@@ -304,13 +314,24 @@ public final class TripVideoService extends Service {
         return null;
     }
 
-    private void pipelineFailure(Throwable failure) { fail(failure == null ? null : failure.getMessage()); }
+    private void pipelineFailure(Throwable failure) {
+        main.post(() -> {
+            try { apply(ServiceStateReducer.Event.pipelineFailed(nextSequence(),
+                    failure == null ? null : failure.getMessage())); }
+            catch (Exception nested) { fail(nested.getMessage()); }
+        });
+    }
     private void fail(String message) {
         Log.e("HavalCamera", "Video service: " + message);
         if (Build.VERSION.SDK_INT >= 26) ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
                 .notify(NOTIFICATION, notification("Erro: " + (message == null ? "indisponível" : message)));
     }
     private void updateNotification() {
+        if (reducer.state().error != null) {
+            ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(
+                    NOTIFICATION, notification("Erro: " + reducer.state().error));
+            return;
+        }
         String text;
         switch (reducer.state().mode) {
             case RECORDING: text = "Gravando viagem"; break;
@@ -332,6 +353,57 @@ public final class TripVideoService extends Service {
         if (Build.VERSION.SDK_INT >= 26) ((NotificationManager) getSystemService(NOTIFICATION_SERVICE))
                 .createNotificationChannel(new NotificationChannel(CHANNEL, "Gravação da câmera", NotificationManager.IMPORTANCE_LOW));
     }
-    @Override public void onDestroy() { main.removeCallbacks(tick); stopPipeline(); if (capture != null) capture.close(); super.onDestroy(); }
-    @Override public IBinder onBind(Intent intent) { return null; }
+    private void ensureCapture() {
+        if (captureRunning) return;
+        captureRunning = true; capture.start(frames::publish);
+    }
+    private void stopCaptureIfUnused() {
+        if (encoder != null || frames.previewSubscriberCount() > 0 || !captureRunning) return;
+        captureRunning = false; capture.stop();
+    }
+    private void updateOverlay() {
+        if (encoder == null || settings == null) return;
+        VideoSettings.Snapshot value = settings.snapshot();
+        encoder.setOverlaySnapshot(telemetry.snapshot(SystemClock.elapsedRealtime(), System.currentTimeMillis(),
+                new TelemetryOverlayModel.Settings(value.overlayMaster, value.overlayDateTime,
+                        value.overlaySpeed, value.overlayAcceleration, value.overlayDriveState,
+                        value.overlayDecelerationRegen,
+                        TelemetryOverlayModel.Position.valueOf(value.overlayPosition.name()))));
+    }
+    private long requireStartMs(Intent intent) {
+        if (!intent.hasExtra(VideoContract.EXTRA_START_MS)) throw new IllegalArgumentException("Missing start timestamp");
+        long value = intent.getLongExtra(VideoContract.EXTRA_START_MS, -1);
+        if (value < 0 || value > System.currentTimeMillis() + 300_000) throw new IllegalArgumentException("Invalid start timestamp");
+        return value;
+    }
+    private void persistTripStart(String tripId, long startMs) {
+        if (!getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().putLong(START_PREFIX + tripId, startMs).commit())
+            throw new IllegalStateException("Could not persist trip start");
+    }
+    private long tripStart(String tripId) {
+        long value = getSharedPreferences(PREFERENCES, MODE_PRIVATE).getLong(START_PREFIX + tripId, -1);
+        if (value < 0) throw new IllegalStateException("Missing trip start timestamp");
+        return value;
+    }
+    private void finalizeCatalogTrip(String tripId, long endMs) throws Exception {
+        if (tripId == null) return;
+        if (tripId.equals(activeTripId)) { stopPipeline(); activeTripId = null; clearPersistedRecording(); }
+        for (VideoCatalog.Trip trip : catalog.localSnapshot())
+            if (Long.toString(trip.tripId).equals(tripId) && !trip.completed) catalog.completeTrip(tripId, endMs);
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().remove(START_PREFIX + tripId).commit();
+    }
+    private void discardCompletedOrActive(String tripId) throws Exception {
+        if (tripId.equals(activeTripId)) { stopPipeline(); activeTripId = null; clearPersistedRecording(); }
+        catalog.discardTrip(tripId);
+        getSharedPreferences(PREFERENCES, MODE_PRIVATE).edit().remove(START_PREFIX + tripId).commit();
+    }
+    public final class LocalBinder extends Binder {
+        public FrameRouter.Subscription subscribePreview(java.util.function.Consumer<byte[]> consumer) {
+            FrameRouter.Subscription subscription = frames.subscribe(consumer); ensureCapture();
+            return () -> { subscription.close(); stopCaptureIfUnused(); };
+        }
+    }
+    private final LocalBinder binder = new LocalBinder();
+    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); if (capture != null) { capture.stop(); capture.close(); } super.onDestroy(); }
+    @Override public IBinder onBind(Intent intent) { return binder; }
 }

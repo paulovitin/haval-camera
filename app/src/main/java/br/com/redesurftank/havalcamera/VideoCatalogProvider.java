@@ -9,6 +9,9 @@ import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Process;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.HashMap;
@@ -25,19 +28,18 @@ public final class VideoCatalogProvider extends ContentProvider {
     }
     private VideoCatalog catalog;
     private VideoSettings settings;
-    private CommandJournal journal;
 
     @Override public boolean onCreate() {
         try {
             catalog = VideoCatalog.shared(getContext().getFilesDir());
             settings = VideoSettings.from(getContext());
-            journal = new CommandJournal(getContext().getSharedPreferences("trip-video-journal", 0));
             return true;
         } catch (Exception failure) { return false; }
     }
 
     @Override public Cursor query(Uri uri, String[] projection, String selection,
             String[] selectionArgs, String sortOrder) {
+        enforce(VideoContract.READ_PERMISSION);
         if (MATCHER.match(uri) != TRIPS) throw new IllegalArgumentException("Unknown read-only URI");
         MatrixCursor cursor = new MatrixCursor(new String[]{"trip_id","source","start_ms","end_ms","byte_size","segments"});
         for (VideoCatalog.Trip trip : catalog.completedSnapshot()) {
@@ -49,16 +51,30 @@ public final class VideoCatalogProvider extends ContentProvider {
     }
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+        enforce(VideoContract.READ_PERMISSION);
         if (!"r".equals(mode) || MATCHER.match(uri) != SEGMENT) throw new FileNotFoundException("Read only");
         try {
-            File file = catalog.completedSegmentFile(uri.getPathSegments().get(1), uri.getLastPathSegment());
-            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            String tripId = uri.getPathSegments().get(1);
+            File file = catalog.completedSegmentFile(tripId, uri.getLastPathSegment());
+            VideoCatalog.ReadLease lease = catalog.acquireReadLease(tripId);
+            try {
+                return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY,
+                        new Handler(Looper.getMainLooper()), failure -> lease.close());
+            } catch (Exception failure) {
+                lease.close();
+                FileNotFoundException unavailable = new FileNotFoundException("Completed segment unavailable");
+                unavailable.initCause(failure); throw unavailable;
+            }
         } catch (Exception failure) { throw new FileNotFoundException("Completed segment unavailable"); }
     }
 
     @Override public Bundle call(String method, String arg, Bundle extras) {
-        if ("getSettings".equals(method)) return settingsBundle(settings.snapshot(), journal.settingsRevision(), true);
+        if ("getSettings".equals(method)) {
+            enforce(VideoContract.READ_PERMISSION);
+            return settingsBundle(settings.snapshot(), settings.revision(), true);
+        }
         if ("updateSettings".equals(method)) {
+            enforce(VideoContract.CONTROL_PERMISSION);
             if (extras == null) throw new IllegalArgumentException("Missing settings patch");
             long expected = extras.getLong(VideoContract.EXTRA_EXPECTED_SETTINGS_REVISION, -1);
             String requestId = extras.getString(VideoContract.EXTRA_REQUEST_ID);
@@ -66,9 +82,7 @@ public final class VideoCatalogProvider extends ContentProvider {
             Bundle values = extras.getBundle(VideoContract.EXTRA_SETTINGS_PATCH);
             if (values == null || values.size() > 16) throw new IllegalArgumentException("Invalid settings patch");
             for (String key : values.keySet()) patch.put(key, values.get(key));
-            VideoSettings.Snapshot current = settings.snapshot();
-            CommandJournal.SettingsDecision<VideoSettings.Snapshot> decision = journal.applySettings(
-                    expected, requestId, current, () -> settings.applyPatch(patch));
+            VideoSettings.Update decision = settings.applyRevisionedPatch(expected, requestId, patch);
             Intent refresh = new Intent(getContext(), TripVideoService.class)
                     .setAction(VideoContract.ACTION_REFRESH_SETTINGS);
             if (android.os.Build.VERSION.SDK_INT >= 26) getContext().startForegroundService(refresh);
@@ -102,9 +116,14 @@ public final class VideoCatalogProvider extends ContentProvider {
     }
 
     @Override public String getType(Uri uri) {
+        enforce(VideoContract.READ_PERMISSION);
         return MATCHER.match(uri) == TRIPS ? "vnd.android.cursor.dir/vnd.havalcamera.trip" : "video/mp4";
     }
-    @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException("Read only"); }
-    @Override public int delete(Uri uri, String selection, String[] selectionArgs) { throw new UnsupportedOperationException("Read only"); }
-    @Override public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) { throw new UnsupportedOperationException("Read only"); }
+    private void enforce(String permission) {
+        if (android.os.Binder.getCallingUid() != Process.myUid())
+            getContext().enforceCallingPermission(permission, "Missing signature permission");
+    }
+    @Override public Uri insert(Uri uri, ContentValues values) { enforce(VideoContract.CONTROL_PERMISSION); throw new UnsupportedOperationException("Read only"); }
+    @Override public int delete(Uri uri, String selection, String[] selectionArgs) { enforce(VideoContract.CONTROL_PERMISSION); throw new UnsupportedOperationException("Read only"); }
+    @Override public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) { enforce(VideoContract.CONTROL_PERMISSION); throw new UnsupportedOperationException("Read only"); }
 }

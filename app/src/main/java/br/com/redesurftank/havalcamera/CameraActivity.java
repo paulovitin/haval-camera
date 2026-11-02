@@ -2,8 +2,12 @@ package br.com.redesurftank.havalcamera;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.ServiceConnection;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.view.Gravity;
@@ -18,9 +22,19 @@ public final class CameraActivity extends Activity {
     private final Handler handler = new Handler();
     private CameraPreview preview;
     private TextView status;
-    private CameraCaptureClient capture;
+    private TripVideoService.LocalBinder service;
+    private FrameRouter.Subscription previewSubscription;
+    private boolean bound;
     private volatile long lastFrame;
     private boolean active;
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = (TripVideoService.LocalBinder) binder; startStream();
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            service = null; stopStream();
+        }
+    };
 
     private final Runnable monitor = new Runnable() {
         @Override public void run() {
@@ -56,62 +70,40 @@ public final class CameraActivity extends Activity {
         actions.addView(retry); actions.addView(gallery); actions.addView(settings); actions.addView(close);
         layout.addView(actions,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.RIGHT));
         setContentView(layout);
-        capture = new CameraCaptureClient(this, this::onCaptureState);
+        Intent serviceIntent = new Intent(this, TripVideoService.class);
+        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent); else startService(serviceIntent);
     }
 
     @Override protected void onResume() {
-        super.onResume(); active=true; preview.onResume(); startStream(); handler.post(monitor);
+        super.onResume(); active=true; preview.onResume();
+        bound = bindService(new Intent(this, TripVideoService.class), connection, Context.BIND_AUTO_CREATE);
+        status.setText("Conectando à câmera…"); handler.post(monitor);
     }
 
     private void startStream() {
         if (!active) return;
-        capture.start(frame -> {
+        if (service == null || previewSubscription != null) return;
+        previewSubscription = service.subscribePreview(frame -> {
             preview.publish(frame);
             lastFrame = SystemClock.elapsedRealtime();
+            runOnUiThread(() -> status.setText("Câmera ao vivo"));
         });
-    }
-
-    private void onCaptureState(CameraCaptureClient.State state, String detail) {
-        if (!active) return;
-        switch (state) {
-            case NEEDS_SHIZUKU:
-                status.setText("Inicie o Shizuku e toque em Conectar.");
-                break;
-            case WAITING_PERMISSION:
-                status.setText("Aguardando autorização do Shizuku…");
-                break;
-            case NEEDS_ROOT:
-                status.setText("Nesta central, inicie o Shizuku com acesso root.");
-                break;
-            case CONNECTING:
-                status.setText("Conectando à câmera…");
-                break;
-            case STREAMING:
-                status.setText("Câmera ao vivo");
-                break;
-            case DISCONNECTED:
-                preview.clear();
-                status.setText("Captura encerrada. Toque em Conectar.");
-                break;
-            case ERROR:
-                preview.clear();
-                status.setText("Sem imagem: " + (detail == null ? "captura encerrada" : detail));
-                break;
-        }
     }
 
     private void stopStream() {
         lastFrame=0;
-        capture.stop();
+        if (previewSubscription != null) previewSubscription.close();
+        previewSubscription = null;
         preview.clear();
     }
 
     @Override protected void onPause() {
-        active=false; handler.removeCallbacks(monitor); stopStream(); preview.onPause(); super.onPause();
+        active=false; handler.removeCallbacks(monitor); stopStream();
+        if (bound) unbindService(connection); bound=false; service=null;
+        preview.onPause(); super.onPause();
     }
 
     @Override protected void onDestroy() {
-        capture.close();
         super.onDestroy();
     }
 }

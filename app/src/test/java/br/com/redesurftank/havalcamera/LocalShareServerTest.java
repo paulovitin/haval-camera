@@ -27,7 +27,7 @@ public final class LocalShareServerTest {
     @Test public void cookieIs128BitAndBoundToClient() throws Exception {
         LocalShareServer.Session session = session(1_000);
         LocalShareServer.Response paired = session.pair("10.0.0.2", "123456", 1_001);
-        assertEquals(200, paired.status);
+        assertEquals(303, paired.status);
         assertEquals(32, paired.cookie.length());
         assertEquals(200, session.list("10.0.0.2", paired.cookie, 1_002).status);
         assertEquals(403, session.list("10.0.0.3", paired.cookie, 1_002).status);

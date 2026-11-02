@@ -11,7 +11,7 @@ public final class ServiceStateReducer {
 
     public enum Mode { IDLE, RECORDING, LIVE_ONLY, RECORDING_LIVE }
     public enum EffectType {
-        START_RECORDING, STOP_RECORDING, PAUSE_RECORDING, START_CAPTURE, STOP_CAPTURE,
+        START_RECORDING, STOP_RECORDING, PAUSE_RECORDING, FINALIZE_TRIP, START_CAPTURE, STOP_CAPTURE,
         ATTACH_LIVE, DETACH_LIVE, PAUSE_TRANSFER, RESUME_TRANSFER, CANCEL_TRANSFER
     }
 
@@ -25,6 +25,8 @@ public final class ServiceStateReducer {
         public final Mode mode;
         public final String tripId;
         public final boolean manualRecording;
+        public final boolean parkedRecording;
+        public final String error;
         public final boolean transferActive;
         public final boolean transferPaused;
         public final boolean automaticRecording;
@@ -35,13 +37,15 @@ public final class ServiceStateReducer {
         final long viewerLostAtMs;
         final long liveStartedAtMs;
 
-        private State(Mode mode, String tripId, boolean manualRecording,
+        private State(Mode mode, String tripId, boolean manualRecording, boolean parkedRecording,
                 boolean transferActive, boolean transferPaused, boolean automaticRecording,
                 boolean recordParkedLive, boolean remoteLive, boolean remoteDownloads,
-                String authoritativeTripId, long viewerLostAtMs, long liveStartedAtMs) {
+                String authoritativeTripId, long viewerLostAtMs, long liveStartedAtMs, String error) {
             this.mode = mode;
             this.tripId = tripId;
             this.manualRecording = manualRecording;
+            this.parkedRecording = parkedRecording;
+            this.error = error;
             this.transferActive = transferActive;
             this.transferPaused = transferPaused;
             this.automaticRecording = automaticRecording;
@@ -54,19 +58,20 @@ public final class ServiceStateReducer {
         }
 
         public static State idle() {
-            return new State(Mode.IDLE, null, false, false, false,
-                    true, false, true, true, null, -1, -1);
+            return new State(Mode.IDLE, null, false, false, false, false,
+                    true, false, true, true, null, -1, -1, null);
         }
 
         public static State recovered(String tripId, boolean manual) {
-            return new State(Mode.RECORDING, requiredId(tripId), manual, false, false,
-                    true, false, true, true, tripId, -1, -1);
+            return new State(Mode.RECORDING, requiredId(tripId), manual, false, false, false,
+                    true, false, true, true, manual ? null : tripId, -1, -1, null);
         }
     }
 
     public enum EventType {
-        START_AUTOMATIC, START_MANUAL, STOP_RECORDING, VIEWER_CONNECTED,
-        VIEWER_LOST, TRANSFER_STARTED, TRANSFER_STOPPED, SETTINGS, TICK
+        START_AUTOMATIC, STOP_AUTOMATIC, START_MANUAL, STOP_MANUAL, STOP_RECORDING,
+        VIEWER_CONNECTED, VIEWER_LOST, TRANSFER_STARTED, TRANSFER_STOPPED,
+        SETTINGS, TICK, PIPELINE_FAILED
     }
 
     public static final class Event {
@@ -78,15 +83,17 @@ public final class ServiceStateReducer {
         final boolean recordParkedLive;
         final boolean remoteLive;
         final boolean remoteDownloads;
+        final String detail;
 
         private Event(EventType type, long sequence, String tripId, long nowMs,
                 boolean automaticRecording, boolean recordParkedLive,
-                boolean remoteLive, boolean remoteDownloads) {
+                boolean remoteLive, boolean remoteDownloads, String detail) {
             this.type = type; this.sequence = sequence; this.tripId = tripId; this.nowMs = nowMs;
             this.automaticRecording = automaticRecording;
             this.recordParkedLive = recordParkedLive;
             this.remoteLive = remoteLive;
             this.remoteDownloads = remoteDownloads;
+            this.detail = detail;
         }
 
         public static Event startAutomatic(String id, long sequence) {
@@ -94,6 +101,14 @@ public final class ServiceStateReducer {
         }
         public static Event startManual(String id, long sequence) {
             return simple(EventType.START_MANUAL, sequence, requiredId(id), 0);
+        }
+        public static Event stopManual(long sequence) { return simple(EventType.STOP_MANUAL, sequence, null, 0); }
+        public static Event stopAutomatic(String id, long sequence) {
+            return simple(EventType.STOP_AUTOMATIC, sequence, requiredId(id), 0);
+        }
+        public static Event pipelineFailed(long sequence, String detail) {
+            return new Event(EventType.PIPELINE_FAILED, sequence, null, 0,
+                    true, false, true, true, detail == null ? "indisponível" : detail);
         }
         public static Event stopRecording(long sequence) {
             return simple(EventType.STOP_RECORDING, sequence, null, 0);
@@ -116,10 +131,10 @@ public final class ServiceStateReducer {
         public static Event settings(long sequence, boolean automatic, boolean parked,
                 boolean live, boolean downloads, String currentTripId) {
             return new Event(EventType.SETTINGS, sequence, currentTripId, 0,
-                    automatic, parked, live, downloads);
+                    automatic, parked, live, downloads, null);
         }
         private static Event simple(EventType type, long sequence, String id, long nowMs) {
-            return new Event(type, sequence, id, nowMs, true, false, true, true);
+            return new Event(type, sequence, id, nowMs, true, false, true, true, null);
         }
     }
 
@@ -136,6 +151,8 @@ public final class ServiceStateReducer {
         State old = state;
         String recording = old.tripId;
         boolean manual = old.manualRecording;
+        boolean parkedRecording = old.parkedRecording;
+        String error = old.error;
         String authoritative = old.authoritativeTripId;
         boolean transfer = old.transferActive;
         boolean paused = old.transferPaused;
@@ -146,22 +163,33 @@ public final class ServiceStateReducer {
         boolean viewer = old.mode == Mode.LIVE_ONLY || old.mode == Mode.RECORDING_LIVE;
         long lostAt = old.viewerLostAtMs;
         long liveStarted = old.liveStartedAtMs;
+        boolean finalize = false;
 
         switch (event.type) {
             case START_AUTOMATIC:
                 authoritative = event.tripId;
-                if (automatic) { recording = event.tripId; manual = false; }
+                if (automatic) { recording = event.tripId; manual = false; parkedRecording = false; }
+                error = null;
                 break;
+            case STOP_AUTOMATIC:
+                if (!event.tripId.equals(authoritative)) return Collections.emptyList();
+                if (event.tripId.equals(recording)) recording = null;
+                authoritative = null; manual = false; parkedRecording = false; finalize = true; break;
             case START_MANUAL:
-                recording = event.tripId; manual = true; break;
+                if (authoritative != null || recording != null) return Collections.emptyList();
+                recording = event.tripId; manual = true; parkedRecording = false; error = null; break;
+            case STOP_MANUAL:
+                if (!manual || parkedRecording) return Collections.emptyList();
+                recording = null; manual = false; break;
             case STOP_RECORDING:
-                recording = null; manual = false; authoritative = null; break;
+                recording = null; manual = false; parkedRecording = false; authoritative = null; break;
             case VIEWER_CONNECTED:
                 if (liveAllowed) {
                     viewer = true; lostAt = -1; liveStarted = event.nowMs;
                     if (parked && recording == null) {
                         recording = Long.toString(event.nowMs);
                         manual = true;
+                        parkedRecording = true;
                     }
                 }
                 break;
@@ -181,24 +209,32 @@ public final class ServiceStateReducer {
                 authoritative = event.tripId;
                 if (!automatic && !manual) recording = null;
                 else if (automatic && recording == null && authoritative != null) recording = authoritative;
+                if (!parked && parkedRecording) { recording = null; manual = false; parkedRecording = false; }
                 if (!liveAllowed) { viewer = false; lostAt = -1; liveStarted = -1; }
                 if (!downloads) { transfer = false; paused = false; }
                 break;
             case TICK:
                 if (lostAt >= 0 && event.nowMs - lostAt >= VIEWER_GRACE_MS) {
                     viewer = false; lostAt = -1; liveStarted = -1;
-                } else if (recording == null && liveStarted >= 0
+                    if (parkedRecording) { recording = null; manual = false; parkedRecording = false; }
+                } else if (liveStarted >= 0
                         && event.nowMs - liveStarted >= PARKED_LIVE_LIMIT_MS) {
                     viewer = false; lostAt = -1; liveStarted = -1;
+                    if (parkedRecording) { recording = null; manual = false; parkedRecording = false; }
                 }
                 break;
+            case PIPELINE_FAILED:
+                recording = null; manual = false; parkedRecording = false;
+                viewer = false; lostAt = -1; liveStarted = -1; error = event.detail; break;
         }
         paused = transfer && viewer;
         Mode mode = recording == null ? (viewer ? Mode.LIVE_ONLY : Mode.IDLE)
                 : (viewer ? Mode.RECORDING_LIVE : Mode.RECORDING);
-        state = new State(mode, recording, manual, transfer, paused, automatic, parked,
-                liveAllowed, downloads, authoritative, lostAt, liveStarted);
-        return effects(old, state);
+        state = new State(mode, recording, manual, parkedRecording, transfer, paused, automatic, parked,
+                liveAllowed, downloads, authoritative, lostAt, liveStarted, error);
+        List<Effect> result = new ArrayList<>(effects(old, state));
+        if (finalize) result.add(new Effect(EffectType.FINALIZE_TRIP, event.tripId));
+        return Collections.unmodifiableList(result);
     }
 
     private static List<Effect> effects(State old, State next) {
@@ -210,7 +246,7 @@ public final class ServiceStateReducer {
         if (oldRecording && (!newRecording || !old.tripId.equals(next.tripId))) {
             boolean pauseAutomatic = !old.manualRecording && !next.automaticRecording
                     && old.tripId.equals(next.authoritativeTripId);
-            result.add(new Effect(pauseAutomatic ? EffectType.PAUSE_RECORDING
+            result.add(new Effect((pauseAutomatic || next.error != null) ? EffectType.PAUSE_RECORDING
                     : EffectType.STOP_RECORDING, old.tripId));
         }
         if ((!oldRecording && newRecording)

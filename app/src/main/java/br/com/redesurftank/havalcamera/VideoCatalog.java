@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -43,6 +45,7 @@ public final class VideoCatalog {
 
     private final File root;
     private final Map<Long, MutableTrip> trips = new LinkedHashMap<>();
+    private final Map<Long, Integer> readLeases = new LinkedHashMap<>();
 
     public VideoCatalog(File filesDirectory) throws IOException {
         if (filesDirectory == null) throw new NullPointerException("filesDirectory");
@@ -151,6 +154,7 @@ public final class VideoCatalog {
 
     public synchronized void discardTrip(String tripId) throws IOException {
         long id = parseTripId(tripId);
+        if (readLeases.getOrDefault(id, 0) > 0) throw new IllegalStateException("Trip is being read");
         File directory = tripDirectory(id);
         if (directory.exists()) deleteTree(directory.toPath());
         trips.remove(id);
@@ -249,6 +253,30 @@ public final class VideoCatalog {
             throw new IllegalArgumentException("Completed segment not found");
         }
         return fixedChild(tripDirectory(id), trip.segments.get(ordinal - 1).fileName);
+    }
+
+    public synchronized ReadLease acquireReadLease(String tripId) {
+        long id = parseTripId(tripId);
+        MutableTrip trip = requireTrip(id);
+        if (!trip.completed) throw new IllegalArgumentException("Completed trip required");
+        readLeases.put(id, readLeases.getOrDefault(id, 0) + 1);
+        return new ReadLease(this, id);
+    }
+
+    public synchronized Set<Long> leasedTripIds() { return Collections.unmodifiableSet(new HashSet<>(readLeases.keySet())); }
+
+    private synchronized void releaseReadLease(long tripId) {
+        int count = readLeases.getOrDefault(tripId, 0);
+        if (count <= 1) readLeases.remove(tripId); else readLeases.put(tripId, count - 1);
+    }
+
+    public static final class ReadLease implements AutoCloseable {
+        private VideoCatalog catalog; private final long tripId;
+        private ReadLease(VideoCatalog catalog, long tripId) { this.catalog = catalog; this.tripId = tripId; }
+        @Override public synchronized void close() {
+            if (catalog == null) return;
+            catalog.releaseReadLease(tripId); catalog = null;
+        }
     }
 
     private List<Trip> snapshot(boolean completedOnly) {

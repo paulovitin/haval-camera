@@ -6,6 +6,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Validated private settings. One atomic store write publishes each snapshot. */
 public final class VideoSettings {
@@ -16,14 +18,21 @@ public final class VideoSettings {
 
     public static final class MemoryStore implements Store {
         private Map<String, Object> values = new HashMap<>();
+        private boolean failNext;
         @Override public synchronized Map<String, Object> read() { return new HashMap<>(values); }
         @Override public synchronized boolean write(Map<String, Object> next) {
+            if (failNext) { failNext = false; return false; }
             values = new HashMap<>(next); return true;
         }
+        public synchronized void failNextWrite() { failNext = true; }
     }
 
     private final Store store;
     private Snapshot snapshot;
+    private long revision;
+    private final Set<String> requestIds = new HashSet<>();
+    private static final String REVISION = "_settingsRevision";
+    private static final String REQUESTS = "_settingsRequestIds";
 
     public static VideoSettings from(Context context) {
         SharedPreferences preferences = context.getSharedPreferences("video-settings", Context.MODE_PRIVATE);
@@ -47,17 +56,54 @@ public final class VideoSettings {
 
     VideoSettings(Store store) {
         this.store = Objects.requireNonNull(store, "store");
-        snapshot = Snapshot.from(store.read());
+        Map<String, Object> values = store.read();
+        snapshot = Snapshot.from(values);
+        Object savedRevision = values.get(REVISION);
+        revision = savedRevision instanceof Number ? ((Number) savedRevision).longValue() : 0;
+        Object requests = values.get(REQUESTS);
+        if (requests instanceof String && !((String) requests).isEmpty())
+            Collections.addAll(requestIds, ((String) requests).split("\\n", -1));
     }
 
     public synchronized Snapshot snapshot() { return snapshot; }
 
     public synchronized Snapshot reload() {
-        snapshot = Snapshot.from(store.read());
+        Map<String, Object> values = store.read();
+        snapshot = Snapshot.from(values);
+        Object savedRevision = values.get(REVISION);
+        revision = savedRevision instanceof Number ? ((Number) savedRevision).longValue() : 0;
         return snapshot;
     }
 
+    public synchronized long revision() { return revision; }
+
+    public synchronized Update applyRevisionedPatch(long expectedRevision, String requestId,
+            Map<String, ?> patch) {
+        if (requestId == null || requestId.isEmpty() || requestId.length() > 128
+                || requestId.contains("\n")) throw new IllegalArgumentException("Invalid request ID");
+        if (expectedRevision != revision || requestIds.contains(requestId))
+            return new Update(false, revision, snapshot);
+        Snapshot candidate = patched(patch);
+        long nextRevision = revision + 1;
+        Set<String> nextRequests = new HashSet<>(requestIds); nextRequests.add(requestId);
+        Map<String, Object> values = candidate.values();
+        values.put(REVISION, nextRevision);
+        values.put(REQUESTS, String.join("\n", nextRequests));
+        if (!store.write(values)) throw new IllegalStateException("Could not persist settings");
+        snapshot = candidate; revision = nextRevision; requestIds.add(requestId);
+        return new Update(true, revision, snapshot);
+    }
+
     public synchronized Snapshot applyPatch(Map<String, ?> patch) {
+        Snapshot candidate = patched(patch);
+        Map<String, Object> values = candidate.values();
+        values.put(REVISION, revision); values.put(REQUESTS, String.join("\n", requestIds));
+        if (!store.write(values)) throw new IllegalStateException("Could not persist settings");
+        snapshot = candidate;
+        return candidate;
+    }
+
+    private Snapshot patched(Map<String, ?> patch) {
         if (patch == null || patch.isEmpty() || patch.size() > 16)
             throw new IllegalArgumentException("Settings patch is empty or too large");
         Map<String, Object> values = snapshot.values();
@@ -66,9 +112,14 @@ public final class VideoSettings {
             values.put(entry.getKey(), validate(entry.getKey(), entry.getValue()));
         }
         Snapshot candidate = Snapshot.from(values);
-        if (!store.write(candidate.values())) throw new IllegalStateException("Could not persist settings");
-        snapshot = candidate;
         return candidate;
+    }
+
+    public static final class Update {
+        public final boolean applied; public final long revision; public final Snapshot snapshot;
+        Update(boolean applied, long revision, Snapshot snapshot) {
+            this.applied = applied; this.revision = revision; this.snapshot = snapshot;
+        }
     }
 
     private static Object validate(String key, Object value) {
