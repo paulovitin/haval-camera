@@ -1,0 +1,73 @@
+package br.com.redesurftank.havalcamera;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import org.junit.Test;
+
+public final class ServiceStateReducerTest {
+    @Test public void modesAndViewerGracePreserveRecording() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 1_000));
+        assertEquals(ServiceStateReducer.Mode.RECORDING_LIVE, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.viewerLost(3, 2_000));
+        assertEquals(ServiceStateReducer.Mode.RECORDING_LIVE, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.tick(4, 16_999));
+        assertEquals(ServiceStateReducer.Mode.RECORDING_LIVE, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.tick(5, 17_000));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+    }
+
+    @Test public void manualAndParkedLiveWorkWithoutAutomaticTrip() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startManual("1700000000000", 1));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+        assertTrue(reducer.state().manualRecording);
+        reducer.apply(ServiceStateReducer.Event.stopRecording(2));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(3, 5_000));
+        assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.tick(4, 1_805_000));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+    }
+
+    @Test public void livePausesTransferAndViewerLossResumesIt() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.transferStarted(1));
+        assertTrue(reducer.state().transferActive);
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 1_000));
+        assertTrue(reducer.state().transferPaused);
+        reducer.apply(ServiceStateReducer.Event.viewerLost(3, 2_000));
+        reducer.apply(ServiceStateReducer.Event.tick(4, 17_000));
+        assertTrue(reducer.state().transferActive);
+        assertFalse(reducer.state().transferPaused);
+    }
+
+    @Test public void togglesApplyImmediatelyAndEnableCurrentTrip() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.settings(
+                1, false, false, true, true, "55"));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.settings(
+                2, true, false, true, true, "55"));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+        reducer.apply(ServiceStateReducer.Event.settings(
+                3, true, false, false, false, "55"));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(4, 1_000));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+        assertFalse(reducer.state().transferActive);
+    }
+
+    @Test public void restartReconcilesPersistedTrip() {
+        ServiceStateReducer reducer = new ServiceStateReducer(
+                ServiceStateReducer.State.recovered("77", false));
+        assertEquals(ServiceStateReducer.Mode.RECORDING, reducer.state().mode);
+        assertEquals("77", reducer.state().tripId);
+        assertTrue(reducer.apply(ServiceStateReducer.Event.stopRecording(9)).stream()
+                .anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.STOP_RECORDING));
+    }
+}
