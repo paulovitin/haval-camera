@@ -1,6 +1,7 @@
 package br.com.redesurftank.havalcamera;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -82,5 +83,16 @@ public final class RetryableStartEffectTest {
         assertTrue(service.contains(
                 "private void apply(ServiceStateReducer.Event event) throws Exception {\n"
                 + "        RetryableStartEffect.apply(reducer, event, nextSequence(), this::execute);"));
+    }
+
+    @Test public void nonStartEffectFailureDoesNotBecomeAPipelineStartFailure() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("100", 1));
+
+        assertThrows(IOException.class, () -> RetryableStartEffect.apply(reducer,
+                ServiceStateReducer.Event.settings(2, false, false, true, true, "100"),
+                3, effect -> { throw new IOException("pause"); }));
+
+        assertNull(reducer.state().error);
     }
 }
