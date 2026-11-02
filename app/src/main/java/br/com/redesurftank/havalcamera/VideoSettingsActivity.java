@@ -10,6 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import java.util.HashMap;
 import java.util.Map;
 
 /** Local source-of-truth settings screen. */
