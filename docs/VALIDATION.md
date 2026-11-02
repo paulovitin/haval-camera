@@ -46,6 +46,14 @@ A compilação emitiu os sete avisos já conhecidos de anotações AndroidX e AP
 
 Ao testar outra central, registre modelo, versão Android, identificação pública do firmware, versão do Shizuku e modo de execução, commit/versão do APK, duração observada e resultado de cada verificação. Remova VIN, endereços de rede, credenciais e imagens pessoais antes de compartilhar diagnósticos. Marque como pendente qualquer cenário que não tenha sido executado.
 
+## Produtor de vídeo ao vivo
+
+Em 2 de novembro de 2026, o commit `e64fb95d2ecbd9ee` passou no job autorizado `haval-camera-e64fb95d2ecbd9ee-20261102T212402Z-20402`. A fila executou 108 testes JVM e montou os APKs debug e release. Assinatura, alinhamento, lint vital e integridade ZIP passaram. O APK release tem SHA-256 `84c479672268438bc6cb99eb025b4489b7a02d0ccc22c6e65b9304fa21358358`.
+
+Os testes cobrem fila limitada a 1 MiB ou 30 mensagens, recuperação por keyframe, CONFIG antes do primeiro access unit, autenticação no header `Authorization: Bearer`, ausência do token na URL, WSS obrigatório, expiração sem reutilização, pedido de keyframe no formato do relay, códigos de fechamento e isolamento entre falha de rede e gravação local. OkHttp permanece em 5.4.0; nenhuma dependência de teste foi adicionada.
+
+Esta evidência é somente de software. Não houve instalação, publicação ou teste de rede no carro. WSS real, MQTT/IPC instalado, frames do encoder físico, perda e retorno de 4G, latência, gravação simultânea, grace period de 15 segundos, AVM OEM, carga e temperatura permanecem pendentes nos gates de hardware.
+
 ## Ciclo foreground, galeria e compartilhamento local
 
 Em 2 de novembro de 2026, o commit `5f70c5e165b19c7e` passou no job autorizado `haval-camera-5f70c5e165b19c7e-20261102T194320Z-29565`. A fila executou os testes JVM e montou os APKs debug e release; assinatura, alinhamento e integridade ZIP também passaram. Os testes cobrem reducer de ciclo, configurações seguras e sessão LAN autenticada, além dos testes anteriores.
