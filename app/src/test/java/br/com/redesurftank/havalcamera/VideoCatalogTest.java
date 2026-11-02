@@ -193,6 +193,18 @@ public final class VideoCatalogTest {
         assertRejected(catalog, "-1");
     }
 
+    @Test public void readLeaseBlocksDeletionUntilClosed() throws Exception {
+        VideoCatalog catalog = new VideoCatalog(temporaryFolder.getRoot());
+        catalog.beginTrip("7", 1, VideoCatalog.Source.MANUAL);
+        catalog.completeTrip("7", 2);
+        try (VideoCatalog.ReadLease lease = catalog.acquireReadLease("7")) {
+            assertTrue(catalog.leasedTripIds().contains(7L));
+            assertThrows(IllegalStateException.class, () -> catalog.discardTrip("7"));
+        }
+        catalog.discardTrip("7");
+        assertTrue(catalog.completedSnapshot().isEmpty());
+    }
+
     private void assertRejected(VideoCatalog catalog, String tripId) throws Exception {
         try {
             catalog.beginTrip(tripId, 1_000, VideoCatalog.Source.AUTOMATIC);

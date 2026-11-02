@@ -69,4 +69,31 @@ public final class VideoSettingsTest {
         assertEquals(10L << 30, value.reserveBytes);
         assertEquals(VideoSettings.OverlayPosition.BOTTOM_RIGHT, value.overlayPosition);
     }
+
+    @Test public void revisionPatchCommitsSnapshotRevisionAndRequestTogether() {
+        VideoSettings.MemoryStore store = new VideoSettings.MemoryStore();
+        VideoSettings settings = new VideoSettings(store);
+        VideoSettings.Update applied = settings.applyRevisionedPatch(
+                0, "request-1", Map.of("quality", "high"));
+        assertTrue(applied.applied);
+        assertEquals(1, applied.revision);
+        VideoSettings restarted = new VideoSettings(store);
+        assertEquals(1, restarted.revision());
+        assertEquals(VideoSettings.Quality.HIGH, restarted.snapshot().quality);
+        assertFalse(restarted.applyRevisionedPatch(
+                0, "request-2", Map.of("quality", "economy")).applied);
+        assertFalse(restarted.applyRevisionedPatch(
+                1, "request-1", Map.of("quality", "economy")).applied);
+    }
+
+    @Test public void failedAtomicSettingsCommitPublishesNothing() {
+        VideoSettings.MemoryStore store = new VideoSettings.MemoryStore();
+        VideoSettings settings = new VideoSettings(store);
+        store.failNextWrite();
+        assertThrows(IllegalStateException.class, () -> settings.applyRevisionedPatch(
+                0, "request-1", Map.of("quality", "high")));
+        VideoSettings restarted = new VideoSettings(store);
+        assertEquals(0, restarted.revision());
+        assertEquals(VideoSettings.Quality.STANDARD, restarted.snapshot().quality);
+    }
 }

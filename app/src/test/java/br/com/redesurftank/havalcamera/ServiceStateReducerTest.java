@@ -91,4 +91,46 @@ public final class ServiceStateReducerTest {
         assertEquals(ServiceStateReducer.Mode.LIVE_ONLY, reducer.state().mode);
         assertTrue(effects.stream().anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.START_CAPTURE));
     }
+
+    @Test public void manualCommandsCannotAffectAutomaticRecording() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        assertTrue(reducer.apply(ServiceStateReducer.Event.startManual("20", 2)).isEmpty());
+        assertTrue(reducer.apply(ServiceStateReducer.Event.stopManual(3)).isEmpty());
+        assertEquals("10", reducer.state().tripId);
+    }
+
+    @Test public void parkedRecordingStopsAfterGraceExpiryAndDisable() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.settings(1, true, true, true, true, null));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(2, 100_000));
+        assertTrue(reducer.state().parkedRecording);
+        reducer.apply(ServiceStateReducer.Event.viewerLost(3, 101_000));
+        reducer.apply(ServiceStateReducer.Event.tick(4, 116_000));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+
+        reducer.apply(ServiceStateReducer.Event.settings(5, true, true, true, true, null));
+        reducer.apply(ServiceStateReducer.Event.viewerConnected(6, 200_000));
+        reducer.apply(ServiceStateReducer.Event.settings(7, true, false, true, true, null));
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+    }
+
+    @Test public void authoritativeStopStillFinalizesWhileAutomaticRecordingPaused() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        reducer.apply(ServiceStateReducer.Event.settings(2, false, false, true, true, "10"));
+        assertEquals("10", reducer.state().authoritativeTripId);
+        assertTrue(reducer.apply(ServiceStateReducer.Event.stopAutomatic("10", 3)).stream()
+                .anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.FINALIZE_TRIP));
+    }
+
+    @Test public void pipelineFailureStopsCaptureAndErrorSurvivesTicks() {
+        ServiceStateReducer reducer = new ServiceStateReducer();
+        reducer.apply(ServiceStateReducer.Event.startAutomatic("10", 1));
+        assertTrue(reducer.apply(ServiceStateReducer.Event.pipelineFailed(2, "codec")).stream()
+                .anyMatch(effect -> effect.type == ServiceStateReducer.EffectType.STOP_CAPTURE));
+        reducer.apply(ServiceStateReducer.Event.tick(3, 10_000));
+        assertEquals("codec", reducer.state().error);
+        assertEquals(ServiceStateReducer.Mode.IDLE, reducer.state().mode);
+    }
 }

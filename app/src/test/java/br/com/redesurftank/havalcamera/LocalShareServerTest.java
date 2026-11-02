@@ -66,6 +66,17 @@ public final class LocalShareServerTest {
         assertEquals(410, session.pair("10.0.0.2", "123456", 1_001).status);
     }
 
+    @Test public void rootShowsBoundedPairingFormAndPairRedirects() throws Exception {
+        LocalShareServer.Session session = session(1_000);
+        LocalShareServer.Response form = session.portal("10.0.0.2", null, 1_001);
+        assertEquals(200, form.status);
+        assertTrue(form.body.length < 4_096);
+        assertTrue(new String(form.body, StandardCharsets.UTF_8).contains("name=\"code\""));
+        LocalShareServer.Response paired = session.pair("10.0.0.2", "123456", 1_002);
+        assertEquals(303, paired.status);
+        assertEquals("/", paired.location);
+    }
+
     private LocalShareServer.Session session(long now) throws Exception {
         File root = folder.getRoot();
         VideoCatalog catalog = new VideoCatalog(root);
