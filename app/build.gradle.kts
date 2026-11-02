@@ -5,10 +5,7 @@ plugins {
 val signingEnvironment = listOf(
     "CAMERA_KEYSTORE", "CAMERA_KEY_ALIAS", "CAMERA_STORE_PASS", "CAMERA_KEY_PASS"
 ).associateWith { providers.environmentVariable(it).orNull }
-val hasReleaseSigning = signingEnvironment.values.any { it != null }
-require(!hasReleaseSigning || signingEnvironment.values.all { !it.isNullOrBlank() }) {
-    "Release signing requires CAMERA_KEYSTORE, CAMERA_KEY_ALIAS, CAMERA_STORE_PASS and CAMERA_KEY_PASS."
-}
+val hasReleaseSigning = signingEnvironment.values.all { !it.isNullOrBlank() }
 
 val prepareLicenseAssets by tasks.registering(Sync::class) {
     from(rootProject.file("LICENSE")) { rename { "LICENSE.txt" } }
@@ -51,8 +48,8 @@ android {
     lint { disable += "ExpiredTargetSdkVersion" }
 
     signingConfigs {
-        if (hasReleaseSigning) {
-            create("cameraRelease") {
+        create("cameraRelease") {
+            if (hasReleaseSigning) {
                 storeFile = rootProject.file(signingEnvironment.getValue("CAMERA_KEYSTORE")!!)
                 require(storeFile!!.isFile) { "CAMERA_KEYSTORE must point to an existing keystore." }
                 keyAlias = signingEnvironment.getValue("CAMERA_KEY_ALIAS")
@@ -65,7 +62,17 @@ android {
         getByName("release") {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "cameraRelease" else "debug")
+            signingConfig = signingConfigs.getByName("cameraRelease")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "validateSigningRelease") {
+        doFirst {
+            require(hasReleaseSigning) {
+                "Release signing requires CAMERA_KEYSTORE, CAMERA_KEY_ALIAS, CAMERA_STORE_PASS and CAMERA_KEY_PASS."
+            }
         }
     }
 }

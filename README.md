@@ -53,11 +53,11 @@ Depois de qualquer mudança, execute no Mac Mini:
 bash build.sh
 ```
 
-O teste `BuildSmokeTest.existingFrameSizeIsStable()` fixa 1760 × 720 e 3.801.600 bytes por quadro. `build.sh` monta `:app:assembleRelease` com verificação estrita, copia o APK para `build/haval-camera.apk` e executa `apksigner verify`, `zipalign -c 4` e `unzip -tq`. Gradle incorpora AGPL-3.0, MIT do Shizuku e avisos Apache-2.0 das novas dependências nos assets.
+O teste `BuildSmokeTest.existingFrameSizeIsStable()` fixa 1760 × 720 e 3.801.600 bytes por quadro. `build.sh` monta `:app:assembleRelease` com verificação estrita, copia o APK para `build/haval-camera.apk` e executa `apksigner verify`, confere o SHA-256 do certificado EcoTrip aprovado, executa `zipalign -c 4` e `unzip -tq`. Gradle incorpora AGPL-3.0, MIT do Shizuku e avisos Apache-2.0 das novas dependências nos assets.
 
-Builds debug usam a assinatura debug do Gradle. Sem variáveis de assinatura, o APK de teste gerado pelo script também usa essa chave, normalmente em `$HOME/.android/debug.keystore`; ele não reutiliza automaticamente o antigo `build/debug.keystore`. Para assinar atualizações com uma chave existente, defina **todas** as variáveis `CAMERA_KEYSTORE`, `CAMERA_KEY_ALIAS`, `CAMERA_STORE_PASS` e `CAMERA_KEY_PASS`. Configuração parcial ou keystore inexistente causa erro, sem imprimir senhas. Nunca publique o keystore. Assinatura de release não é suportada pela fila padrão do Mini: qualquer execução assinada com certificado aprovado exige o fluxo autorizado, sem enviar segredos no arquivo-fonte.
+Builds debug usam somente a assinatura debug do Gradle. `build.sh` exige **todas** as variáveis `CAMERA_KEYSTORE`, `CAMERA_KEY_ALIAS`, `CAMERA_STORE_PASS` e `CAMERA_KEY_PASS`, e aceita o APK somente quando o certificado do assinante tem SHA-256 `5efec0f94d84d90e769635a81d51e2f25953d5d5b3cea950a115705d3b5e83e0`. Configuração parcial, keystore inexistente ou outro certificado causa erro sem imprimir senhas. Nunca publique o keystore. A fila autorizada injeta esse material somente no caminho restrito `android-camera-verify`, sem incluí-lo no arquivo-fonte ou nos artefatos.
 
-O workflow instala as versões fixadas, executa os testes antes do script e publica somente `build/haval-camera.apk`. As actions permanecem fixadas por SHA. Um resultado do CI não valida a câmera do carro nem substitui os gates físicos pendentes.
+O workflow hospedado mantém a action de checkout fixada por SHA e executa somente verificações estáticas de shell, TOML e XML. Ele não instala SDK, não executa Gradle ou `build.sh` e não publica APK. Testes, builds e artefatos Android existem somente na fila auditada do Mac Mini. Esses resultados não validam a câmera do carro nem substituem os gates físicos pendentes.
 
 ## Usar em outros aplicativos
 
