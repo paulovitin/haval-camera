@@ -1,8 +1,8 @@
 package br.com.redesurftank.havalcamera;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.os.Bundle;
+import android.net.Uri;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -10,7 +10,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
-import java.util.HashMap;
 import java.util.Map;
 
 /** Local source-of-truth settings screen. */
@@ -64,14 +63,19 @@ public final class VideoSettingsActivity extends Activity {
         position.setSelection(value.overlayPosition.ordinal());
     }
     private void save() {
-        Map<String, Object> patch = new HashMap<>();
-        for (Map.Entry<String, CheckBox> entry : toggles.entrySet()) patch.put(entry.getKey(), entry.getValue().isChecked());
-        patch.put("quality", quality.getSelectedItem().toString());
-        patch.put("reserveGb", Integer.parseInt(reserve.getSelectedItem().toString()));
-        patch.put("overlayPosition", position.getSelectedItem().toString());
-        settings.applyPatch(patch);
-        Intent refresh = new Intent(this, TripVideoService.class).setAction(VideoContract.ACTION_REFRESH_SETTINGS);
-        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(refresh); else startService(refresh);
-        finish();
+        Bundle patch = new Bundle();
+        for (Map.Entry<String, CheckBox> entry : toggles.entrySet()) patch.putBoolean(entry.getKey(), entry.getValue().isChecked());
+        patch.putString("quality", quality.getSelectedItem().toString());
+        patch.putInt("reserveGb", Integer.parseInt(reserve.getSelectedItem().toString()));
+        patch.putString("overlayPosition", position.getSelectedItem().toString());
+        Uri provider = Uri.parse("content://" + VideoCatalogProvider.AUTHORITY);
+        Bundle current = getContentResolver().call(provider, "getSettings", null, null);
+        Bundle extras = new Bundle();
+        extras.putLong(VideoContract.EXTRA_EXPECTED_SETTINGS_REVISION,
+                current.getLong(VideoContract.EXTRA_SETTINGS_REVISION));
+        extras.putString(VideoContract.EXTRA_REQUEST_ID, "local-settings-" + System.currentTimeMillis());
+        extras.putBundle(VideoContract.EXTRA_SETTINGS_PATCH, patch);
+        Bundle result = getContentResolver().call(provider, "updateSettings", null, extras);
+        if (result != null && result.getBoolean("applied")) finish();
     }
 }
