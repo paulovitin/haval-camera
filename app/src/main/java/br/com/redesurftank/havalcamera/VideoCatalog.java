@@ -25,6 +25,7 @@ public final class VideoCatalog {
     private static final Pattern NUMERIC_ID = Pattern.compile("[0-9]+");
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-fA-F]{64}");
     private static final Pattern MIME = Pattern.compile("[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+");
+    private static final String PENDING_SEGMENT = "segment.pending.json";
     private static final Pattern TRIP_JSON = Pattern.compile(
             "\\{\\\"tripId\\\":([0-9]+),\\\"source\\\":\\\"(automatic|manual)\\\"," +
             "\\\"startMs\\\":([0-9]+),\\\"endMs\\\":(null|[0-9]+)," +
@@ -90,9 +91,20 @@ public final class VideoCatalog {
         String fileName = String.format(Locale.US, "%06d.mp4", segmentId);
         File completedFile = fixedChild(directory, fileName);
         if (completedFile.exists()) throw new IOException("Completed segment already exists: " + fileName);
-        atomicMove(partial.toPath(), completedFile.toPath());
-
         Segment segment = new Segment(segmentId, fileName, metadata);
+        File pending = fixedChild(directory, PENDING_SEGMENT);
+        writeAtomically(pending, segmentJson(segment));
+        try {
+            atomicMove(partial.toPath(), completedFile.toPath());
+        } catch (IOException failure) {
+            try {
+                Files.deleteIfExists(pending.toPath());
+            } catch (IOException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+
         trip.segments.add(segment);
         try {
             writeTrip(trip);
@@ -101,6 +113,7 @@ public final class VideoCatalog {
             throw failure;
         }
         writeIndex();
+        Files.delete(pending.toPath());
         return segment;
     }
 
@@ -108,7 +121,10 @@ public final class VideoCatalog {
         MutableTrip trip = requireTrip(parseTripId(tripId));
         if (endMs < trip.startMs) throw new IllegalArgumentException("Trip end precedes start");
         if (trip.completed) {
-            if (trip.endMs == endMs) return;
+            if (trip.endMs == endMs) {
+                writeIndex();
+                return;
+            }
             throw new IllegalStateException("Trip is already complete");
         }
         trip.completed = true;
@@ -141,12 +157,14 @@ public final class VideoCatalog {
                 if (!attributes.isDirectory() || !NUMERIC_ID.matcher(name).matches()) continue;
                 long id = parseTripId(name);
                 File directory = tripDirectory(id);
-                Files.deleteIfExists(fixedChild(directory, "current.partial").toPath());
                 File metadata = fixedChild(directory, "trip.json");
                 if (!metadata.isFile()) continue;
                 MutableTrip trip = parseTrip(new String(
                         Files.readAllBytes(metadata.toPath()), StandardCharsets.UTF_8));
                 if (trip.tripId != id) throw new IOException("Trip metadata ID does not match directory");
+                recoverPendingSegment(directory, trip);
+                Files.deleteIfExists(fixedChild(directory, "current.partial").toPath());
+                Files.deleteIfExists(fixedChild(directory, PENDING_SEGMENT + ".tmp").toPath());
                 for (Segment segment : trip.segments) {
                     if (!fixedChild(directory, segment.fileName).isFile()) {
                         throw new IOException("Missing completed segment " + segment.fileName);
@@ -160,6 +178,46 @@ public final class VideoCatalog {
         trips.clear();
         trips.putAll(recovered);
         writeIndex();
+    }
+
+    private void recoverPendingSegment(File directory, MutableTrip trip) throws IOException {
+        File pendingFile = fixedChild(directory, PENDING_SEGMENT);
+        if (!pendingFile.exists()) return;
+        if (!pendingFile.isFile()) throw new IOException("Pending segment metadata is not a file");
+        Segment pending = parseSegment(new String(
+                Files.readAllBytes(pendingFile.toPath()), StandardCharsets.UTF_8));
+        File completedFile = fixedChild(directory, pending.fileName);
+        File partial = fixedChild(directory, "current.partial");
+        if (!completedFile.exists()) {
+            if (!partial.isFile()) {
+                Files.delete(pendingFile.toPath());
+                return;
+            }
+            if (partial.length() != pending.byteSize) {
+                throw new IOException("Pending segment byte size mismatch");
+            }
+            atomicMove(partial.toPath(), completedFile.toPath());
+        } else if (partial.exists()) {
+            throw new IOException("Pending segment has both partial and completed files");
+        }
+        if (!completedFile.isFile() || completedFile.length() != pending.byteSize) {
+            throw new IOException("Pending completed segment is invalid");
+        }
+
+        if (pending.segmentId == trip.segments.size() + 1) {
+            trip.segments.add(pending);
+            try {
+                writeTrip(trip);
+            } catch (IOException failure) {
+                trip.segments.remove(trip.segments.size() - 1);
+                throw failure;
+            }
+        } else if (pending.segmentId > trip.segments.size()
+                || !segmentJson(trip.segments.get(pending.segmentId - 1))
+                        .equals(segmentJson(pending))) {
+            throw new IOException("Pending segment does not match trip metadata");
+        }
+        Files.delete(pendingFile.toPath());
     }
 
     public synchronized List<Trip> localSnapshot() {
@@ -270,21 +328,52 @@ public final class VideoCatalog {
                 .append(",\"segments\":[");
         for (int index = 0; index < trip.segments.size(); index++) {
             if (index > 0) json.append(',');
-            Segment segment = trip.segments.get(index);
-            json.append("{\"segmentId\":").append(segment.segmentId)
-                    .append(",\"fileName\":\"").append(segment.fileName).append('\"')
-                    .append(",\"startMs\":").append(segment.startMs)
-                    .append(",\"endMs\":").append(segment.endMs)
-                    .append(",\"durationUs\":").append(segment.durationUs)
-                    .append(",\"byteSize\":").append(segment.byteSize)
-                    .append(",\"sha256\":\"").append(segment.sha256).append('\"')
-                    .append(",\"codec\":{\"mime\":\"").append(segment.codec.mime).append('\"')
-                    .append(",\"width\":").append(segment.codec.width)
-                    .append(",\"height\":").append(segment.codec.height)
-                    .append(",\"frameRate\":").append(segment.codec.frameRate)
-                    .append(",\"bitrate\":").append(segment.codec.bitrate).append("}}");
+            json.append(segmentJson(trip.segments.get(index)));
         }
         return json.append("]}").toString();
+    }
+
+    private static String segmentJson(Segment segment) {
+        return new StringBuilder("{\"segmentId\":").append(segment.segmentId)
+                .append(",\"fileName\":\"").append(segment.fileName).append('\"')
+                .append(",\"startMs\":").append(segment.startMs)
+                .append(",\"endMs\":").append(segment.endMs)
+                .append(",\"durationUs\":").append(segment.durationUs)
+                .append(",\"byteSize\":").append(segment.byteSize)
+                .append(",\"sha256\":\"").append(segment.sha256).append('\"')
+                .append(",\"codec\":{\"mime\":\"").append(segment.codec.mime).append('\"')
+                .append(",\"width\":").append(segment.codec.width)
+                .append(",\"height\":").append(segment.codec.height)
+                .append(",\"frameRate\":").append(segment.codec.frameRate)
+                .append(",\"bitrate\":").append(segment.codec.bitrate).append("}}")
+                .toString();
+    }
+
+    private static Segment parseSegment(String json) {
+        Matcher matcher = SEGMENT_JSON.matcher(json);
+        if (!matcher.matches()) throw new IllegalArgumentException("Malformed pending segment");
+        return segmentFromMatcher(matcher);
+    }
+
+    private static Segment segmentFromMatcher(Matcher matcher) {
+        Codec codec = new Codec(matcher.group(8),
+                Integer.parseInt(matcher.group(9)),
+                Integer.parseInt(matcher.group(10)),
+                Integer.parseInt(matcher.group(11)),
+                Integer.parseInt(matcher.group(12)));
+        SegmentMetadata metadata = new SegmentMetadata(
+                Long.parseLong(matcher.group(3)),
+                Long.parseLong(matcher.group(4)),
+                Long.parseLong(matcher.group(5)),
+                Long.parseLong(matcher.group(6)),
+                matcher.group(7), codec);
+        int segmentId = Integer.parseInt(matcher.group(1));
+        if (segmentId < 1) throw new IllegalArgumentException("Invalid segment ID");
+        String expectedName = String.format(Locale.US, "%06d.mp4", segmentId);
+        if (!expectedName.equals(matcher.group(2))) {
+            throw new IllegalArgumentException("Invalid segment file name");
+        }
+        return new Segment(segmentId, expectedName, metadata);
     }
 
     private static MutableTrip parseTrip(String json) {
@@ -307,23 +396,11 @@ public final class VideoCatalog {
                     throw new IllegalArgumentException("Malformed segment list");
                 }
             }
-            Codec codec = new Codec(segmentMatcher.group(8),
-                    Integer.parseInt(segmentMatcher.group(9)),
-                    Integer.parseInt(segmentMatcher.group(10)),
-                    Integer.parseInt(segmentMatcher.group(11)),
-                    Integer.parseInt(segmentMatcher.group(12)));
-            SegmentMetadata metadata = new SegmentMetadata(
-                    Long.parseLong(segmentMatcher.group(3)),
-                    Long.parseLong(segmentMatcher.group(4)),
-                    Long.parseLong(segmentMatcher.group(5)),
-                    Long.parseLong(segmentMatcher.group(6)),
-                    segmentMatcher.group(7), codec);
-            int segmentId = Integer.parseInt(segmentMatcher.group(1));
-            String expectedName = String.format(Locale.US, "%06d.mp4", segmentId);
-            if (!expectedName.equals(segmentMatcher.group(2)) || segmentId != trip.segments.size() + 1) {
+            Segment segment = segmentFromMatcher(segmentMatcher);
+            if (segment.segmentId != trip.segments.size() + 1) {
                 throw new IllegalArgumentException("Segments are not ordered");
             }
-            trip.segments.add(new Segment(segmentId, expectedName, metadata));
+            trip.segments.add(segment);
             cursor = segmentMatcher.end();
         }
         if (cursor != segmentsJson.length()) throw new IllegalArgumentException("Malformed segment list");
