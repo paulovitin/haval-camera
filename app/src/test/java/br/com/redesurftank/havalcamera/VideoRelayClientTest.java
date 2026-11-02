@@ -26,7 +26,8 @@ public final class VideoRelayClientTest {
 
         Request request = fixture.factory.requests.get(0);
         assertEquals("Bearer secret-producer-token-1234567890", request.header("Authorization"));
-        assertEquals("wss://bridge.example/ws/video/live/car?session=session-1",
+        // OkHttp represents a WSS handshake as its equivalent HTTPS request URL.
+        assertEquals("https://bridge.example/ws/video/live/car?session=session-1",
                 request.url().toString());
         assertFalse(request.url().toString().contains("secret-producer"));
         fixture.client.close();
