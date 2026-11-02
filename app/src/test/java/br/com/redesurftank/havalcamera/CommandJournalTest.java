@@ -3,6 +3,7 @@ package br.com.redesurftank.havalcamera;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import android.content.SharedPreferences;
@@ -103,6 +104,41 @@ public final class CommandJournalTest {
     }
 
     @Test
+    public void failedCommandCommitLeavesJournalRetryable() {
+        MemoryPreferences preferences = new MemoryPreferences();
+        CommandJournal journal = new CommandJournal(preferences);
+        preferences.failNextCommit();
+
+        assertThrows(IllegalStateException.class,
+                () -> journal.apply(1, "request-1", VideoContract.Command.START_TRIP, "100"));
+        assertEquals(0, journal.revision());
+        assertNull(journal.activeTripId());
+
+        CommandJournal.Decision retry =
+                journal.apply(1, "request-1", VideoContract.Command.START_TRIP, "100");
+        assertEquals(CommandJournal.Outcome.APPLIED, retry.outcome);
+        assertEquals(1, retry.revision);
+        assertEquals("100", retry.activeTripId);
+    }
+
+    @Test
+    public void failedSettingsCommitLeavesJournalRetryable() {
+        MemoryPreferences preferences = new MemoryPreferences();
+        CommandJournal journal = new CommandJournal(preferences);
+        preferences.failNextCommit();
+
+        assertThrows(IllegalStateException.class,
+                () -> journal.applySettings(0, "settings-1", "standard", () -> "high"));
+        assertEquals(0, journal.settingsRevision());
+
+        CommandJournal.SettingsDecision<String> retry =
+                journal.applySettings(0, "settings-1", "standard", () -> "high");
+        assertTrue(retry.applied);
+        assertEquals(1, retry.revision);
+        assertEquals("high", retry.snapshot);
+    }
+
+    @Test
     public void telemetryIsFreshnessCheckedAndNeverJournaled() {
         CommandJournal journal = new CommandJournal(new MemoryPreferences());
 
@@ -122,6 +158,9 @@ public final class CommandJournalTest {
 
     private static final class MemoryPreferences implements SharedPreferences {
         private final Map<String, Object> values = new HashMap<>();
+        private boolean failNextCommit;
+
+        void failNextCommit() { failNextCommit = true; }
 
         @Override public Map<String, ?> getAll() { return new HashMap<>(values); }
         @Override public String getString(String key, String fallback) {
@@ -169,7 +208,11 @@ public final class CommandJournalTest {
             @Override public Editor putBoolean(String key, boolean value) { updates.put(key, value); return this; }
             @Override public Editor remove(String key) { removals.add(key); return this; }
             @Override public Editor clear() { clear = true; return this; }
-            @Override public boolean commit() { apply(); return true; }
+            @Override public boolean commit() {
+                if (failNextCommit) { failNextCommit = false; return false; }
+                apply();
+                return true;
+            }
             @Override public void apply() {
                 if (clear) values.clear();
                 for (String key : removals) values.remove(key);
