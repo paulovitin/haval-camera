@@ -33,7 +33,7 @@ public final class VideoCatalog {
             "\\{\\\"tripId\\\":([0-9]+),\\\"source\\\":\\\"(automatic|manual)\\\"," +
             "\\\"startMs\\\":([0-9]+),\\\"endMs\\\":(null|[0-9]+)," +
             "\\\"durationMs\\\":([0-9]+),\\\"byteSize\\\":([0-9]+)," +
-            "\\\"completed\\\":(true|false),\\\"segments\\\":\\[(.*)]}", Pattern.DOTALL);
+            "\\\"completed\\\":(true|false),\\\"segments\\\":\\[(.*)\\]\\}", Pattern.DOTALL);
     private static final Pattern SEGMENT_JSON = Pattern.compile(
             "\\{\\\"segmentId\\\":([0-9]+),\\\"fileName\\\":\\\"([0-9]{6}\\.mp4)\\\"," +
             "\\\"startMs\\\":([0-9]+),\\\"endMs\\\":([0-9]+)," +
@@ -41,7 +41,7 @@ public final class VideoCatalog {
             "\\\"sha256\\\":\\\"([0-9a-f]{64})\\\",\\\"codec\\\":\\{" +
             "\\\"mime\\\":\\\"([A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+)\\\"," +
             "\\\"width\\\":([0-9]+),\\\"height\\\":([0-9]+)," +
-            "\\\"frameRate\\\":([0-9]+),\\\"bitrate\\\":([0-9]+)}}");
+            "\\\"frameRate\\\":([0-9]+),\\\"bitrate\\\":([0-9]+)\\}\\}");
 
     private final File root;
     private final Map<Long, MutableTrip> trips = new LinkedHashMap<>();
