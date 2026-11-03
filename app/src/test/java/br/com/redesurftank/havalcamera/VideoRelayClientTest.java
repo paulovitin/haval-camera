@@ -224,6 +224,30 @@ public final class VideoRelayClientTest {
         fixture.client.close();
     }
 
+    @Test public void liveAndTransferHaveSeparateSocketsAndQueuePressure() throws Exception {
+        java.nio.file.Path root = java.nio.file.Files.createTempDirectory("transfer-live-test");
+        Fixture live = new Fixture();
+        try (RecordingTransferTest.Fixture transfer = new RecordingTransferTest.Fixture(root.toFile(), 3)) {
+            transfer.start(true); transfer.open(); transfer.socket().queued = 1048576;
+            transfer.resume(0); transfer.quiet(0);
+            live.client.start(live.session("l".repeat(32))); live.factory.open(0);
+            live.client.onCodecConfig(bytes(0x67), bytes(0x68));
+            live.client.write(new EncodedAccessUnit(bytes(0x65), 1, true, false));
+            await(() -> live.factory.sockets.get(0).binary.size() == 2);
+            assertEquals(1, transfer.factory.requests.size());
+            transfer.factory.fail(0);
+            assertTrue(live.client.hasActiveCredentials());
+            assertEquals(H264WireCodec.Type.CONFIG, H264WireCodec.decode(
+                    live.factory.sockets.get(0).binary.get(0).asByteBuffer()).type);
+        } finally {
+            live.client.close();
+            try (java.util.stream.Stream<java.nio.file.Path> paths = java.nio.file.Files.walk(root)) {
+                for (java.nio.file.Path path : (Iterable<java.nio.file.Path>) paths.sorted(
+                        java.util.Comparator.reverseOrder())::iterator) java.nio.file.Files.delete(path);
+            }
+        }
+    }
+
     private static final class Fixture {
         final AtomicLong now = new AtomicLong(1_700_000_000_000L);
         final FakeFactory factory = new FakeFactory();
