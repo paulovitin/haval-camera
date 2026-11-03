@@ -80,3 +80,70 @@ Keyframe ACCESS_UNIT, sequence 2, PTS 66,667 microseconds, one IDR NAL `65 88 84
 48 56 43 31 01 02 00 01 00 00 00 02 00 00 00 00 00 01 04 6b 00 00 00 07
 00 00 00 03 65 88 84
 ```
+
+## `HVT1` version 1 transfer framing
+
+This section is the authoritative byte contract for Java, Node, and Swift recording transfers. Each WebSocket binary message contains exactly one 56-byte header followed by the declared payload. A concatenated second frame or any trailing byte is invalid. This framing is independent of HVC1; it does not change live video messages.
+
+The authenticated WebSocket credentials supply transfer session identity; no session ID, trip ID, token, or file path is repeated in the binary header. Credentials must be short-lived, scoped to that transfer and role, and never logged. Ordinals identify segments within the authenticated transfer; membership and completed-file metadata are checked by the transfer consumer, not by this codec.
+
+| Offset | Bytes | Field | Value |
+| ---: | ---: | --- | --- |
+| 0 | 4 | magic | ASCII `HVT1` (`48 56 54 31`) |
+| 4 | 1 | version | `01` |
+| 5 | 1 | type | `01` DATA, `02` EOF, `03` ACK, `04` ERROR |
+| 6 | 2 | flags | `00 00`; no flags are defined in version 1 |
+| 8 | 4 | segment ordinal | u32, 0 through 4,294,967,295 at the codec boundary |
+| 12 | 8 | offset | u64; supported range 0 through 9,223,372,036,854,775,807 |
+| 20 | 4 | payload length | u32, constrained by message type below |
+| 24 | 32 | SHA-256 | raw digest bytes, never hexadecimal text |
+| 56 | payload length | payload | DATA bytes or ERROR UTF-8 text; absent for EOF/ACK |
+
+All multibyte values are big-endian. The offset's high bit must be zero in version 1 so offsets, file sizes, and arithmetic fit a non-negative Java/Swift signed 64-bit value. Node must retain exact 64-bit integers (for example, `BigInt`), without rounding through a JavaScript `Number`. DATA also requires `offset + payloadLength <= 9,223,372,036,854,775,807`; reject overflow before addition. The Java `int ordinal` parameters carry raw u32 bits: `-1` encodes `ff ff ff ff`; decoded `Message.ordinal` is the unsigned `long` value 4,294,967,295. A consumer still rejects any ordinal absent from its selected catalog.
+
+| Type | Offset meaning | Payload | SHA-256 |
+| --- | --- | --- | --- |
+| DATA (`1`) | First byte of this chunk within the segment | 1 through `262144` bytes | SHA-256 of exactly this payload |
+| EOF (`2`) | `totalBytes`, the complete segment size | Zero bytes | Whole-segment SHA-256 from completed catalog metadata |
+| ACK (`3`) | `nextOffset`, the first unpersisted byte | Zero bytes | All 32 bytes zero |
+| ERROR (`4`) | Always zero | 1 through `1024` bytes of strict UTF-8 | SHA-256 of exactly these UTF-8 bytes |
+
+DATA and ERROR digests must match before accepting their payloads. Empty DATA/ERROR messages are invalid. ERROR limits count encoded bytes, not characters; malformed UTF-8, overlong encodings, truncated sequences, and unpaired Java surrogates are rejected rather than replaced. A valid ERROR is an application failure, not malformed framing; its text must not contain credentials, paths, or captured data.
+
+EOF's digest is not a hash of its empty payload. The codec preserves any supplied 32-byte digest; a receiver must compare its durably stored complete segment size and whole-file SHA-256 against EOF and completed catalog metadata before promoting the file. The codec cannot verify a whole file it does not own.
+
+An ACK confirms that every byte before `nextOffset` in that segment is durably persisted and verified. `nextOffset = 0` confirms no bytes. An ACK does not confirm socket receipt alone, authorize skipping bytes, or imply EOF completion. A transfer consumer must validate the ordinal, expected offset, and segment bounds before advancing or resuming; these stateful checks are outside this codec.
+
+### Transfer failure and close behavior
+
+A wrong magic/version/type, any nonzero flag, unsupported unsigned offset, overflow, invalid per-type field/length/digest, truncated header or payload, invalid UTF-8, or trailing byte rejects the entire message. Never persist bytes or advance an ACK after rejection. The Java decoder throws `IllegalArgumentException` and leaves the caller's buffer position, limit, mark, and byte order unchanged on both success and failure. It reads only the remaining bytes, including direct/read-only buffers. Encoders return a buffer at position zero with limit equal to the full frame length; payloads and digests are copied, and decoding returns arrays independent of the input buffer.
+
+The transport consumer must close malformed or unsupported messages with code `4004`. It must not try to send an ERROR in response to malformed/untrusted framing. Existing authentication/session close codes above retain their meanings. A valid ERROR terminates the current transfer attempt without acknowledging further bytes; the consumer ends the session normally with `4000` and preserves the last durably verified offset for any newly authorized retry. A successfully verified EOF completes its named segment; the session ends normally with `4000` once all requested segments are complete. Network loss never implies an ACK; retries require fresh scoped credentials. These are consumer requirements; this codec implements no sockets, sessions, credentials, files, or retries.
+
+### Canonical HVT1 synthetic fixtures
+
+These contiguous hexadecimal messages are identical in Java tests and must be copied verbatim into later Node/Swift tests. Header size is 56 bytes. DATA/ERROR fixtures are 59 bytes; EOF/ACK fixtures are 56 bytes. SHA-256 of UTF-8 `abc` (`61 62 63`) is `ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`.
+
+DATA, ordinal 1, offset 0, payload `abc`:
+
+```text
+485654310101000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263
+```
+
+EOF, ordinal 1, totalBytes 3, whole segment `abc`:
+
+```text
+485654310102000000000001000000000000000300000000ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+```
+
+ACK, ordinal 1, nextOffset 3, zero payload and digest:
+
+```text
+4856543101030000000000010000000000000003000000000000000000000000000000000000000000000000000000000000000000000000
+```
+
+ERROR, ordinal 1, offset 0, UTF-8 message `abc`:
+
+```text
+485654310104000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263
+```
