@@ -133,7 +133,8 @@ public final class LiveSessionPolicyTest {
         for (int i = 0; i < domains.getLength(); i++) {
             org.w3c.dom.Element domain = (org.w3c.dom.Element) domains.item(i);
             assertEquals(config, domain.getParentNode());
-            assertEquals(0, domain.getAttributes().getLength()); // No includeSubdomains or other widening.
+            assertEquals("false", domain.getAttribute("includeSubdomains"));
+            assertEquals(1, domain.getAttributes().getLength()); // No subdomains or other widening.
             assertEquals(0, domain.getElementsByTagName("*").getLength());
             assertTrue(hosts.add(domain.getTextContent().trim()));
         }
