@@ -110,8 +110,8 @@ public final class LiveSessionPolicyTest {
     }
 
     @Test public void serviceChecksIpcSessionIdentityAndLivePolicyBeforeJournalMutation() throws Exception {
-        String service = Files.readString(sourceRoot().resolve(
-                "java/br/com/redesurftank/havalcamera/TripVideoService.java"));
+        String service = new String(Files.readAllBytes(sourceRoot().resolve(
+                "java/br/com/redesurftank/havalcamera/TripVideoService.java")), StandardCharsets.UTF_8);
         int preflight = service.indexOf("? requireLiveSession(intent) : null");
         assertTrue(preflight >= 0 && preflight < service.indexOf("journal.apply", preflight));
         String validation = service.substring(service.indexOf("private VideoRelayClient.Session requireLiveSession"),
