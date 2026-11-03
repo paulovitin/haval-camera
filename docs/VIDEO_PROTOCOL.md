@@ -22,10 +22,14 @@ An automatic `START_TRIP` may reopen a completed catalog entry only when trip ID
 
 ## Live WebSocket authorization
 
-Live producer and viewer credentials are random, one-time, short-lived, TLS-only bearer tokens bound to one session and exactly one scope:
+Live producer and viewer credentials are random, one-time, short-lived bearer tokens bound to one session and exactly one scope. Remote connections require TLS (`wss://`):
 
 - `live:produce`: one car producer may send binary `HVC1` messages.
 - `live:view`: one viewer may receive those messages but may not send video.
+
+Camera live production also accepts `ws://127.0.0.1:PORT` or `ws://[::1]:PORT` through the signature-protected `START_LIVE` IPC. The raw URL must use one of these exact literals, a canonical explicit port from 1 to 65535 other than the WS default 80, and only `session=[A-Za-z0-9_-]+` as its query. Loopback commands must supply a matching session-ID extra; remote WSS callers may omit that extra, but any supplied ID must match. Bearer tokens are 32–512 characters, appear only in the Authorization header, and expire after more than zero and at most 30 minutes. User info, fragments, token-bearing URLs, ambiguous queries, changed session identities and redirects are rejected. Localhost names, alternate IP spellings and LAN/private/public WS hosts remain forbidden.
+
+The manifest-linked `res/xml/network_security_config.xml` denies cleartext by default and permits it only for the exact Android/OkHttp host strings `127.0.0.1` and `::1`, without subdomains. IPv6 URL brackets are not part of OkHttp's host value. This narrow platform allowance does not replace the mandatory live raw-URL and signed-IPC checks. Transfer production remains WSS-only; remote live transport and HVC1 framing remain unchanged.
 
 The WebSocket session selected by the authenticated URL/token supplies session identity, so the binary header does not repeat a session ID. Tokens are never accepted in another session, role, or transfer protocol and must not appear in logs. The relay does not persist or parse video payloads.
 

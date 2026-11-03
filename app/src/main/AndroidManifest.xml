@@ -12,6 +12,7 @@
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
     <application android:label="Câmera Haval" android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <meta-data android:name="moe.shizuku.client.V3_SUPPORT" android:value="true" />
         <provider android:name="rikka.shizuku.ShizukuProvider"
