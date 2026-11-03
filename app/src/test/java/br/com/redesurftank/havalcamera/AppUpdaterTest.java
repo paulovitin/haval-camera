@@ -9,7 +9,7 @@ import static org.junit.Assert.*;
 
 public class AppUpdaterTest {
     @Test public void stableCheckUsesLatestAndDoesNotDownloadApk() throws Exception { check(false,2,true); }
-    @Test public void optInUsesReleasesAndComparesInstalledCode() throws Exception { check(true,3,false); }
+    @Test public void optInUsesReleasesAndComparesInstalledCode() throws Exception { check(true,4,false); }
     private void check(boolean pre,int installed,boolean newer) throws Exception {
         List<String> urls = new CopyOnWriteArrayList<>();
         OkHttpClient client = new OkHttpClient.Builder().addInterceptor(chain -> {

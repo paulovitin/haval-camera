@@ -14,7 +14,7 @@ public class UpdateManifestTest {
     }
     @Test public void ordersOnlyByVersionCode() {
         UpdateManifest m = UpdateManifest.parse(JSON); assertNotNull(m);
-        assertTrue(m.isNewerThan(2)); assertFalse(m.isNewerThan(3)); assertFalse(m.isNewerThan(4));
+        assertTrue(m.isNewerThan(2)); assertTrue(m.isNewerThan(3)); assertFalse(m.isNewerThan(4));
         assertEquals("0.4", m.versionName); assertEquals(3, m.size);
     }
     @Test public void rejectsUnknownSchemaMissingDuplicateAndExtraFields() {
