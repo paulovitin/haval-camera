@@ -92,18 +92,20 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
 
     public static VideoRelayClient createDefault(Runnable requestKeyframe,
             StatusListener statuses, LongSupplier clock) {
+        return new VideoRelayClient(newWebSocketClient("CameraLiveWebSocket"),
+                requestKeyframe, statuses, clock, true);
+    }
+
+    // Each producer owns its dispatcher and socket queue; transfer never shares live pressure.
+    static OkHttpClient newWebSocketClient(String threadName) {
         java.util.concurrent.ExecutorService dispatcherThread =
                 Executors.newSingleThreadExecutor(runnable -> {
-                    Thread thread = new Thread(runnable, "CameraLiveWebSocket");
+                    Thread thread = new Thread(runnable, threadName);
                     thread.setDaemon(true);
                     return thread;
                 });
-        Dispatcher dispatcher = new Dispatcher(dispatcherThread);
-        OkHttpClient client = new OkHttpClient.Builder()
-                .dispatcher(dispatcher)
-                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
-                .build();
-        return new VideoRelayClient(client, requestKeyframe, statuses, clock, true);
+        return new OkHttpClient.Builder().dispatcher(new Dispatcher(dispatcherThread))
+                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS).build();
     }
 
     public synchronized void start(Session session) {

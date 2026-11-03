@@ -161,3 +161,78 @@ ACK maximum u64, ordinal 1, nextOffset 18,446,744,073,709,551,615 (Java `-1L`), 
 ```text
 485654310103000000000001ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000
 ```
+
+## Camera recording transfer producer
+
+`RecordingTransfer` implements HVT1 on a dedicated single worker and a dedicated
+WebSocket/OkHttp dispatcher. It shares only session validation and client creation
+with `VideoRelayClient`; it never uses the HVC1 frame queue. One reusable
+`262144`-byte file-read buffer serves both whole-file verification and chunk
+reads. Codec frame allocations and immutable WebSocket payload copies are bounded
+by one outstanding DATA/EOF, not retained as a retransmission cache.
+
+The signature-protected `TRANSFER` command retains the journal/version/revision
+rules above. It requires `TRIP_ID`, `SEGMENT_IDS` (String ArrayList, 1–256 unique
+catalog ordinals), `SESSION_URL`, `PRODUCER_TOKEN`, `EXPIRES_AT_MS`, `SESSION_ID`
+and `VIEWER_SESSION` (both exactly the URL session). Additive extras under
+`br.com.redesurftank.havalcamera.extra.*` are:
+
+| Extra | Android value | Bridge command field |
+| --- | --- | --- |
+| `OFFSETS` | Bundle: selected ordinal keys to unsigned decimal strings | `offsets` |
+| `COMPLETED_SEGMENT_IDS` | optional String ArrayList, default empty | `completedSegmentIds` |
+| `PAUSED` | boolean, default true | `paused` |
+
+Every selected ordinal must have exactly one offset. Completed ordinals must
+belong to the selection and have offset equal to segment size. URLs require WSS,
+no user info/fragment, exactly the session query, and path
+`/ws/video/transfer/car`. The bearer token stays in `Authorization`, never the URL
+or logs. `CANCEL_TRANSFER` requires the matching `SESSION_ID` while a producer
+exists. Remote downloads disabled rejects transfer and cancels an existing one
+when settings refresh. Transfer startup/transport failures acknowledge a safe
+command error or end only transfer state; they never dispatch `PIPELINE_FAILED`,
+start capture/encoder, or stop an existing recording.
+
+Initial socket connection never authorizes DATA/EOF, including when `PAUSED` is
+false. The bridge may attach the producer before the viewer. Camera accepts the
+approved bridge controls `{"type":"pause","reason":"viewer"}` or reason `live`,
+and `{"type":"resume","offsets":{"1":"0"}}` (all selected ordinals required).
+These controls use the canonical field order shown; whitespace is allowed.
+Unknown/duplicate members, unexpected offsets and malformed controls close 4004.
+A duplicate resume while already running preserves its outstanding frame.
+
+Pause retains the last durable ACK and the catalog lease, sends nothing further,
+and accepts a matching in-flight ACK. Only explicit resume clears an unacknowledged
+frame that the bridge may have discarded and rereads from the confirmed offset.
+Local live has priority. Local live end alone does not resume; an explicit bridge
+resume received while local live is closing is remembered and can run after local
+live ends. The bridge stores only pending metadata and must never cache sent bytes.
+
+Before connecting, Camera leases the completed trip and validates every selected
+catalog segment and its exact file size. Opening payload content additionally
+requires that catalog's active lease and refuses symlinks/path aliases. Active
+trips, `current.partial`, missing files, traversal and unselected IDs cannot be
+transferred. Payload reads use `RandomAccessFile.seek` at the authorized ACK.
+Before first DATA or resumed EOF for each segment, the worker verifies the whole
+file against completed catalog SHA-256 using the same read buffer. DATA hashes
+come from `TransferChunkCodec`; EOF contains completed size and whole-file digest.
+Wire u64 values remain exact: decimal input uses `Long.parseUnsignedLong` and
+bounds use unsigned comparison. Values above local non-negative file length are
+refused at this file boundary without narrowing the codec's u64 domain.
+
+Only a matching ordinal and exact pending end offset can ACK DATA/EOF. EOF needs
+its own final ACK even when DATA's last ACK already equals file size. One frame
+is outstanding at a time; a busy socket queue delays reads instead of accumulating
+another queue. Send completion, pause, timeout and network loss never advance an
+ACK. Failure/close/expiry never reconnect automatically. A newly journaled command
+must supply fresh scoped credentials and bridge-authorized offsets/completed IDs;
+a producer instance also refuses reuse of a consumed token (stores its hash only).
+
+Completion, cancellation, replacement, expiry, invalid ACK/control, ERROR, network
+loss and file/connect/send failures all release ownership. If a worker is reading,
+termination first disables sends, then retains its lease until the file closes;
+only then does it report completion. Service destruction closes the transfer too.
+Catalog index publications notify a listener; the service posts a
+`ContentResolver.notifyChange` for `content://br.com.redesurftank.havalcamera.video/trips`
+so completed-file changes and retention/deletion can trigger metadata refresh.
+Lease changes themselves do not publish catalog changes.

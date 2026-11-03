@@ -3,6 +3,7 @@ package br.com.redesurftank.havalcamera;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -44,6 +45,7 @@ public final class VideoCatalog {
             "\\\"frameRate\\\":([0-9]+),\\\"bitrate\\\":([0-9]+)\\}\\}");
 
     private final File root;
+    private Runnable onChanged = () -> { };
     private final Map<Long, MutableTrip> trips = new LinkedHashMap<>();
     private final Map<Long, Integer> readLeases = new LinkedHashMap<>();
 
@@ -282,6 +284,25 @@ public final class VideoCatalog {
         return new ReadLease(this, id);
     }
 
+    /** Opens only completed, exact catalog content while this catalog owns the lease. */
+    public synchronized RandomAccessFile openTransferSegment(ReadLease lease, String segmentId)
+            throws IOException {
+        if (lease == null || lease.catalog != this) throw new IllegalArgumentException("Active read lease required");
+        String tripId = Long.toString(lease.tripId);
+        File file = completedSegmentFile(tripId, segmentId);
+        Segment segment = requireTrip(lease.tripId).segments.get(Integer.parseInt(segmentId) - 1);
+        File expected = new File(new File(root, tripId), segment.fileName);
+        if (!expected.equals(file) || !Files.isRegularFile(expected.toPath(),
+                java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new IOException("Completed segment unavailable");
+        RandomAccessFile input = new RandomAccessFile(file, "r");
+        try {
+            if (input.length() != segment.byteSize) throw new IOException("Completed segment size mismatch");
+            return input;
+        } catch (IOException failure) {
+            input.close(); throw failure;
+        }
+    }
+
     public synchronized Set<Long> leasedTripIds() { return Collections.unmodifiableSet(new HashSet<>(readLeases.keySet())); }
 
     private synchronized void releaseReadLease(long tripId) {
@@ -290,11 +311,15 @@ public final class VideoCatalog {
     }
 
     public static final class ReadLease implements AutoCloseable {
-        private VideoCatalog catalog; private final long tripId;
+        private volatile VideoCatalog catalog; private final long tripId;
         private ReadLease(VideoCatalog catalog, long tripId) { this.catalog = catalog; this.tripId = tripId; }
-        @Override public synchronized void close() {
-            if (catalog == null) return;
-            catalog.releaseReadLease(tripId); catalog = null;
+        @Override public void close() {
+            VideoCatalog owner = catalog;
+            if (owner == null) return;
+            synchronized (owner) {
+                if (catalog == null) return;
+                owner.releaseReadLease(tripId); catalog = null;
+            }
         }
     }
 
@@ -312,6 +337,10 @@ public final class VideoCatalog {
         writeAtomically(fixedChild(tripDirectory(trip.tripId), "trip.json"), tripJson(trip));
     }
 
+    public synchronized void setOnChanged(Runnable listener) {
+        onChanged = listener == null ? () -> { } : listener;
+    }
+
     private void writeIndex() throws IOException {
         StringBuilder json = new StringBuilder("{\"trips\":[");
         boolean first = true;
@@ -322,6 +351,7 @@ public final class VideoCatalog {
         }
         json.append("]}");
         writeAtomically(fixedChild(root, "index.json"), json.toString());
+        onChanged.run();
     }
 
     private void writeAtomically(File destination, String contents) throws IOException {

@@ -13,6 +13,8 @@ import android.os.Binder;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.os.Bundle;
+import android.net.Uri;
 import android.util.Log;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,6 +38,7 @@ public final class TripVideoService extends Service {
     private SegmentMuxer muxer;
     private RecordingCoordinator coordinator;
     private VideoRelayClient liveClient;
+    private RecordingTransfer transfer;
     private VideoRelayClient.Session pendingLiveSession;
     private final LiveSessionPolicy liveSessionPolicy = new LiveSessionPolicy();
     private String activeTripId;
@@ -57,6 +60,8 @@ public final class TripVideoService extends Service {
         startForeground(NOTIFICATION, notification("Câmera pronta"));
         try {
             catalog = VideoCatalog.shared(getFilesDir());
+            catalog.setOnChanged(() -> main.post(() -> getContentResolver().notifyChange(
+                    Uri.parse("content://" + VideoCatalogProvider.AUTHORITY + "/trips"), null)));
             settings = VideoSettings.from(this);
             journal = new CommandJournal(getSharedPreferences(PREFERENCES, MODE_PRIVATE));
             capture = new CameraCaptureClient(this, (state, detail) -> {
@@ -84,8 +89,13 @@ public final class TripVideoService extends Service {
         if (intent == null || intent.getAction() == null || journal == null) return START_STICKY;
         try { route(intent); }
         catch (Exception failure) {
-            acknowledgeError(intent, failure);
-            fail(failure.getMessage());
+            if (VideoContract.ACTION_TRANSFER.equals(intent.getAction())
+                    || VideoContract.ACTION_CANCEL_TRANSFER.equals(intent.getAction())) {
+                acknowledgeError(intent, new IOException("Transferência indisponível"));
+            } else {
+                acknowledgeError(intent, failure);
+                fail(failure.getMessage());
+            }
         }
         return START_STICKY;
     }
@@ -124,6 +134,9 @@ public final class TripVideoService extends Service {
         String requestId = intent.getStringExtra(VideoContract.EXTRA_REQUEST_ID);
         if (command == VideoContract.Command.START_LIVE)
             liveSessionPolicy.requireStartAllowed(reducer.state());
+        if (command == VideoContract.Command.CANCEL_TRANSFER && transfer != null
+                && !transfer.sessionId().equals(intent.getStringExtra(VideoContract.EXTRA_SESSION_ID)))
+            throw new IllegalArgumentException("Transfer session mismatch");
         if (command == VideoContract.Command.STOP_LIVE)
             liveSessionPolicy.requireMatchingStop(
                     intent.getStringExtra(VideoContract.EXTRA_SESSION_ID));
@@ -168,20 +181,27 @@ public final class TripVideoService extends Service {
                 discardCompletedOrActive(tripId);
                 break;
             case START_LIVE:
+                if (transfer != null) transfer.setLiveActive(true);
                 closeLiveClient();
                 pendingLiveSession = requestedLive;
                 apply(ServiceStateReducer.Event.viewerConnected(nextSequence(), System.currentTimeMillis()));
                 liveSessionPolicy.confirmStarted(requestedLive.sessionId, reducer.state());
                 try { if (liveClient == null) attachLive(); }
-                catch (RuntimeException failure) { closeLiveClient(); throw failure; }
+                catch (RuntimeException failure) {
+                    closeLiveClient();
+                    if (transfer != null) transfer.setLiveActive(false);
+                    throw failure;
+                }
                 break;
             case STOP_LIVE:
                 closeLiveClient();
+                if (transfer != null) transfer.setLiveActive(false);
                 apply(ServiceStateReducer.Event.viewerLost(nextSequence(), System.currentTimeMillis()));
                 break;
             case TRANSFER:
-                apply(ServiceStateReducer.Event.transferStarted(nextSequence())); break;
+                startTransfer(intent); break;
             case CANCEL_TRANSFER:
+                closeTransfer();
                 apply(ServiceStateReducer.Event.transferStopped(nextSequence())); break;
             case DELETE_COMPLETED:
                 VideoContract.requireConfirmedDelete(intent.getBooleanExtra(VideoContract.EXTRA_DELETE_CONFIRMED, false));
@@ -243,6 +263,9 @@ public final class TripVideoService extends Service {
             case STOP_CAPTURE: stopPipeline(false); break;
             case ATTACH_LIVE: break;
             case DETACH_LIVE: closeLiveClient(); break;
+            case PAUSE_TRANSFER: if (transfer != null) transfer.setLiveActive(true); break;
+            case RESUME_TRANSFER: if (transfer != null) transfer.setLiveActive(false); break;
+            case CANCEL_TRANSFER: closeTransfer(); break;
             default: break;
         }
     }
@@ -390,6 +413,52 @@ public final class TripVideoService extends Service {
         });
     }
 
+    private void startTransfer(Intent intent) throws Exception {
+        if (!settings.snapshot().remoteDownloads) throw new IllegalArgumentException("Downloads disabled");
+        VideoRelayClient.Session session = new VideoRelayClient.Session(
+                intent.getStringExtra(VideoContract.EXTRA_SESSION_URL),
+                intent.getStringExtra(VideoContract.EXTRA_PRODUCER_TOKEN),
+                intent.getLongExtra(VideoContract.EXTRA_EXPIRES_AT_MS, -1));
+        if (!session.sessionId.equals(intent.getStringExtra(VideoContract.EXTRA_SESSION_ID))
+                || !session.sessionId.equals(intent.getStringExtra(VideoContract.EXTRA_VIEWER_SESSION)))
+            throw new IllegalArgumentException("Transfer session mismatch");
+        ArrayList<String> ids = intent.getStringArrayListExtra(VideoContract.EXTRA_SEGMENT_IDS);
+        java.util.Map<String, String> offsets = new java.util.LinkedHashMap<>();
+        Bundle supplied = intent.getBundleExtra(RecordingTransfer.EXTRA_OFFSETS);
+        if (supplied == null || supplied.size() > 256) throw new IllegalArgumentException("Transfer offsets required");
+        for (String id : supplied.keySet()) offsets.put(id, supplied.getString(id));
+        ArrayList<String> completed = intent.getStringArrayListExtra(RecordingTransfer.EXTRA_COMPLETED_SEGMENT_IDS);
+        closeTransfer();
+        final RecordingTransfer[] holder = new RecordingTransfer[1];
+        RecordingTransfer created = RecordingTransfer.createDefault(catalog,
+                () -> main.post(() -> transferEnded(holder[0])), System::currentTimeMillis);
+        holder[0] = created;
+        created.setLiveActive(liveClient != null || pendingLiveSession != null);
+        try {
+            created.start(session, intent.getStringExtra(VideoContract.EXTRA_TRIP_ID), ids, offsets,
+                    completed == null ? java.util.Collections.emptySet() : new java.util.HashSet<>(completed),
+                    intent.getBooleanExtra(RecordingTransfer.EXTRA_PAUSED, true));
+        } catch (Exception failure) {
+            created.close();
+            apply(ServiceStateReducer.Event.transferStopped(nextSequence()));
+            throw failure;
+        }
+        transfer = created;
+        apply(ServiceStateReducer.Event.transferStarted(nextSequence()));
+    }
+
+    private void transferEnded(RecordingTransfer expected) {
+        if (expected == null || transfer != expected) return;
+        closeTransfer();
+        try { apply(ServiceStateReducer.Event.transferStopped(nextSequence())); }
+        catch (Exception failure) { updateNotification(); }
+    }
+
+    private void closeTransfer() {
+        RecordingTransfer old = transfer; transfer = null;
+        if (old != null) old.close();
+    }
+
     private VideoRelayClient.Session requireLiveSession(Intent intent) {
         String url = intent.getStringExtra(VideoContract.EXTRA_SESSION_URL);
         String token = intent.getStringExtra(VideoContract.EXTRA_PRODUCER_TOKEN);
@@ -430,6 +499,7 @@ public final class TripVideoService extends Service {
     private void liveEnded(VideoRelayClient expected) {
         if (expected == null || liveClient != expected) return;
         closeLiveClient();
+        if (transfer != null) transfer.setLiveActive(false);
         try { apply(ServiceStateReducer.Event.viewerLost(nextSequence(), System.currentTimeMillis())); }
         catch (Exception failure) { fail(failure.getMessage()); }
     }
@@ -568,6 +638,6 @@ public final class TripVideoService extends Service {
         }
     }
     private final LocalBinder binder = new LocalBinder();
-    @Override public void onDestroy() { main.removeCallbacks(tick); frames.setEncoder(null); stopPipeline(false); if (capture != null) { forceStopCapture(); capture.close(); } super.onDestroy(); }
+    @Override public void onDestroy() { closeTransfer(); if (catalog != null) catalog.setOnChanged(null); main.removeCallbacks(tick); frames.setEncoder(null); stopPipeline(false); if (capture != null) { forceStopCapture(); capture.close(); } super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return binder; }
 }
