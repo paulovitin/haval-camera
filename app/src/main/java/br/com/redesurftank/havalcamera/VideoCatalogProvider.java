@@ -15,7 +15,9 @@ import android.os.Process;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /** Signature-readable completed metadata and MP4 content. Mutations use bounded provider calls. */
 public final class VideoCatalogProvider extends ContentProvider {
@@ -28,6 +30,7 @@ public final class VideoCatalogProvider extends ContentProvider {
     }
     private VideoCatalog catalog;
     private VideoSettings settings;
+    private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
 
     @Override public boolean onCreate() {
         try {
@@ -41,13 +44,32 @@ public final class VideoCatalogProvider extends ContentProvider {
             String[] selectionArgs, String sortOrder) {
         enforce(VideoContract.READ_PERMISSION);
         if (MATCHER.match(uri) != TRIPS) throw new IllegalArgumentException("Unknown read-only URI");
-        MatrixCursor cursor = new MatrixCursor(new String[]{"trip_id","source","start_ms","end_ms","byte_size","segments"});
+        MatrixCursor cursor = new MatrixCursor(new String[]{"trip_id","source","start_ms","end_ms",
+                "byte_size","segments","segment_metadata_json"});
         for (VideoCatalog.Trip trip : catalog.completedSnapshot()) {
-            long bytes = 0; for (VideoCatalog.Segment segment : trip.segments) bytes += segment.byteSize;
+            long bytes = 0;
+            for (VideoCatalog.Segment segment : trip.segments) bytes = Math.addExact(bytes, segment.byteSize);
             cursor.addRow(new Object[]{trip.tripId, trip.source.name().toLowerCase(), trip.startMs,
-                    trip.endMs, bytes, trip.segments.size()});
+                    trip.endMs, bytes, trip.segments.size(), segmentMetadataJson(trip)});
         }
         return cursor;
+    }
+
+    static String segmentMetadataJson(VideoCatalog.Trip trip) {
+        StringBuilder json = new StringBuilder("[");
+        for (int index = 0; index < trip.segments.size(); index++) {
+            VideoCatalog.Segment segment = trip.segments.get(index);
+            if (segment.segmentId != index + 1 || segment.byteSize <= 0 || segment.sha256 == null
+                    || !SHA_256.matcher(segment.sha256.toLowerCase(Locale.US)).matches()) {
+                throw new IllegalStateException("Invalid completed segment metadata");
+            }
+            if (index > 0) json.append(',');
+            json.append("{\"segmentId\":").append(segment.segmentId)
+                    .append(",\"byteSize\":").append(segment.byteSize)
+                    .append(",\"sha256\":\"").append(segment.sha256.toLowerCase(Locale.US))
+                    .append("\"}");
+        }
+        return json.append(']').toString();
     }
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
