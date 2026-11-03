@@ -156,8 +156,41 @@ public final class RecordingTransferTest {
 
     @Test public void localLivePriorityNeverResumesWithoutBridgeControl() throws Exception {
         try (Fixture f = fixture(3)) {
-            f.start(true); f.open(); f.live(true); f.resume(0); f.quiet(0);
+            f.start(true); f.open(); f.live(true); f.quiet(0);
             f.live(false); f.quiet(0); f.resume(0); f.awaitFrames(1);
+        }
+    }
+
+    @Test public void explicitBridgeResumeBeforeLocalLiveCloseIsRememberedButCannotSendDuringLive() throws Exception {
+        try (Fixture f = fixture(3)) {
+            f.start(true); f.open(); f.live(true); f.resume(0); f.quiet(0);
+            f.live(false); f.awaitFrames(1);
+        }
+    }
+
+    @Test public void consumedTokenCannotAuthorizeAnotherAttempt() throws Exception {
+        try (Fixture f = fixture(3)) {
+            f.start(true); f.open(); f.factory.fail(0);
+            assertThrows(IllegalArgumentException.class, () -> f.start(true));
+            assertTrue(f.catalog.leasedTripIds().isEmpty()); assertEquals(1, f.factory.requests.size());
+            f.token = "b".repeat(32); f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
+        }
+    }
+
+    @Test public void completedCatalogMutationsNotifyButLeaseChangesDoNot() throws Exception {
+        try (Fixture f = fixture(3)) {
+            AtomicInteger changes = new AtomicInteger();
+            invoke(VideoCatalog.class.getMethod("setOnChanged", Runnable.class), f.catalog,
+                    (Runnable) changes::incrementAndGet);
+            try (VideoCatalog.ReadLease lease = f.catalog.acquireReadLease("42")) {
+                assertEquals(0, changes.get());
+            }
+            f.catalog.beginTrip("43", 1000, VideoCatalog.Source.MANUAL);
+            int before = changes.get(); f.catalog.completeTrip("43", 2000);
+            assertEquals(before + 1, changes.get());
+            assertEquals(2, f.catalog.completedSnapshot().size());
+            f.catalog.discardTrip("43"); assertEquals(before + 2, changes.get());
+            assertEquals(1, f.catalog.completedSnapshot().size());
         }
     }
 
