@@ -77,7 +77,7 @@ public final class LiveSessionPolicyTest {
                 () -> validate("wss://bridge.example/live?session=s", Long.MAX_VALUE, Long.MIN_VALUE));
     }
 
-    @Test public void exportedServiceRejectsUnprotectedCallersAndHasNoCleartextOverride() throws Exception {
+    @Test public void exportedServiceKeepsSignaturePermissionAndUsesNarrowNetworkPolicy() throws Exception {
         javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         org.w3c.dom.Document manifest = factory.newDocumentBuilder().parse(
@@ -105,8 +105,73 @@ public final class LiveSessionPolicyTest {
         }
         assertTrue(guarded);
         org.w3c.dom.Element app = (org.w3c.dom.Element) manifest.getElementsByTagName("application").item(0);
-        assertTrue(!app.hasAttributeNS(android, "usesCleartextTraffic"));
-        assertTrue(!app.hasAttributeNS(android, "networkSecurityConfig"));
+        assertTrue(!"true".equals(app.getAttributeNS(android, "usesCleartextTraffic")));
+        assertEquals("@xml/network_security_config", app.getAttributeNS(android, "networkSecurityConfig"));
+    }
+
+    @Test public void networkSecurityConfigDeniesCleartextExceptTwoExactLoopbackHosts() throws Exception {
+        org.w3c.dom.Document document = networkSecurityConfig();
+        org.w3c.dom.Element root = document.getDocumentElement();
+        assertEquals("network-security-config", root.getTagName());
+        assertEquals(0, root.getAttributes().getLength());
+        org.w3c.dom.NodeList bases = root.getElementsByTagName("base-config");
+        assertEquals(1, bases.getLength());
+        org.w3c.dom.Element base = (org.w3c.dom.Element) bases.item(0);
+        assertEquals(root, base.getParentNode());
+        assertEquals("false", base.getAttribute("cleartextTrafficPermitted"));
+        assertEquals(1, base.getAttributes().getLength());
+        assertEquals(0, base.getElementsByTagName("*").getLength());
+        org.w3c.dom.NodeList configs = root.getElementsByTagName("domain-config");
+        assertEquals(1, configs.getLength());
+        org.w3c.dom.Element config = (org.w3c.dom.Element) configs.item(0);
+        assertEquals(root, config.getParentNode());
+        assertEquals("true", config.getAttribute("cleartextTrafficPermitted"));
+        assertEquals(1, config.getAttributes().getLength());
+        org.w3c.dom.NodeList domains = root.getElementsByTagName("domain");
+        assertEquals(2, domains.getLength());
+        java.util.Set<String> hosts = new java.util.HashSet<>();
+        for (int i = 0; i < domains.getLength(); i++) {
+            org.w3c.dom.Element domain = (org.w3c.dom.Element) domains.item(i);
+            assertEquals(config, domain.getParentNode());
+            assertEquals(0, domain.getAttributes().getLength()); // No includeSubdomains or other widening.
+            assertEquals(0, domain.getElementsByTagName("*").getLength());
+            assertTrue(hosts.add(domain.getTextContent().trim()));
+        }
+        assertEquals(new java.util.HashSet<>(java.util.Arrays.asList("127.0.0.1", "::1")), hosts);
+        assertEquals(4, root.getElementsByTagName("*").getLength()); // No overrides/nested policies.
+    }
+
+    @Test public void loopbackConfigMatchesOkHttpCanonicalIpv4AndIpv6Hosts() throws Exception {
+        org.w3c.dom.NodeList domains = networkSecurityConfig().getElementsByTagName("domain");
+        java.util.Set<String> hosts = new java.util.HashSet<>();
+        for (int i = 0; i < domains.getLength(); i++) hosts.add(domains.item(i).getTextContent().trim());
+        for (String literal : new String[] {"127.0.0.1", "[::1]"}) {
+            String url = "ws://" + literal + ":8765" + QUERY;
+            assertEquals("LOOPBACK_WS", validate(url, NOW + 60_000, NOW));
+            okhttp3.Request request = new okhttp3.Request.Builder().url(url).build();
+            String canonical = request.url().host();
+            assertEquals("[::1]".equals(literal) ? "::1" : "127.0.0.1", canonical);
+            assertTrue("Android domain must match OkHttp host: " + canonical, hosts.contains(canonical));
+        }
+    }
+
+    @Test public void mergedDebugManifestReferencesNarrowConfigWithoutBroadCleartext() throws Exception {
+        Path app = sourceRoot().toAbsolutePath().getParent().getParent();
+        Path merged = app.resolve("build/intermediates/merged_manifests/debug/processDebugManifest/AndroidManifest.xml");
+        assertTrue("Android manifest merger output is required: " + merged, Files.isRegularFile(merged));
+        javax.xml.parsers.DocumentBuilderFactory factory = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        org.w3c.dom.Document manifest = factory.newDocumentBuilder().parse(merged.toFile());
+        org.w3c.dom.Element application = (org.w3c.dom.Element) manifest.getElementsByTagName("application").item(0);
+        String android = "http://schemas.android.com/apk/res/android";
+        assertEquals("@xml/network_security_config", application.getAttributeNS(android, "networkSecurityConfig"));
+        assertTrue(!"true".equals(application.getAttributeNS(android, "usesCleartextTraffic")));
+    }
+
+    private static org.w3c.dom.Document networkSecurityConfig() throws Exception {
+        Path config = sourceRoot().resolve("res/xml/network_security_config.xml");
+        assertTrue("Exact loopback network security config must exist", Files.isRegularFile(config));
+        return javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(config.toFile());
     }
 
     @Test public void serviceChecksIpcSessionIdentityAndLivePolicyBeforeJournalMutation() throws Exception {
