@@ -455,7 +455,12 @@ public final class TripVideoService extends Service {
         String token = intent.getStringExtra(VideoContract.EXTRA_PRODUCER_TOKEN);
         long expiresAt = intent.getLongExtra(VideoContract.EXTRA_EXPIRES_AT_MS, -1);
         VideoRelayClient.Session session = new VideoRelayClient.Session(url, token, expiresAt);
-        VideoRelayClient.validateSession(session, System.currentTimeMillis());
+        LiveSessionPolicy.Scope scope = VideoRelayClient.validateLiveSession(session, System.currentTimeMillis());
+        // Remote v1 callers may omit the extra; loopback commands must bind it explicitly.
+        if ((scope == LiveSessionPolicy.Scope.LOOPBACK_WS || intent.hasExtra(VideoContract.EXTRA_SESSION_ID))
+                && !session.sessionId.equals(intent.getStringExtra(VideoContract.EXTRA_SESSION_ID))) {
+            throw new IllegalArgumentException("Live session mismatch");
+        }
         return session;
     }
 

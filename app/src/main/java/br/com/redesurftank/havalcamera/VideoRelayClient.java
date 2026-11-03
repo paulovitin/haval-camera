@@ -92,7 +92,8 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
 
     public static VideoRelayClient createDefault(Runnable requestKeyframe,
             StatusListener statuses, LongSupplier clock) {
-        return new VideoRelayClient(newWebSocketClient("CameraLiveWebSocket"),
+        return new VideoRelayClient(newWebSocketClient("CameraLiveWebSocket").newBuilder()
+                .followRedirects(false).followSslRedirects(false).build(),
                 requestKeyframe, statuses, clock, true);
     }
 
@@ -110,7 +111,7 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
 
     public synchronized void start(Session session) {
         if (closed) throw new IllegalStateException("Live client is closed");
-        validateSession(session, clock.getAsLong());
+        validateLiveSession(session, clock.getAsLong());
         endCurrent(true, Status.CLOSED, "replaced");
         long currentGeneration = ++generation;
         sequence = 0;
@@ -324,6 +325,19 @@ public final class VideoRelayClient implements RecordingCoordinator.CodecSink,
         return result;
     }
 
+    static LiveSessionPolicy.Scope validateLiveSession(Session session, long nowMs) {
+        LiveSessionPolicy.Scope scope = LiveSessionPolicy.validate(session.url, session.expiresAtMs, nowMs);
+        if (!session.sessionId.equals(parseSessionId(session.url)))
+            throw new IllegalArgumentException("Live session ID changed");
+        if (session.producerToken.length() < 32 || session.producerToken.length() > 512
+                || session.url.contains(session.producerToken)
+                || URI.create(session.url).getSchemeSpecificPart().contains(session.producerToken)) {
+            throw new IllegalArgumentException("Invalid producer token");
+        }
+        return scope;
+    }
+
+    // Transfer stays WSS-only; loopback authorization belongs solely to live START_LIVE.
     static void validateSession(Session session, long nowMs) {
         URI uri;
         try { uri = URI.create(session.url); }
