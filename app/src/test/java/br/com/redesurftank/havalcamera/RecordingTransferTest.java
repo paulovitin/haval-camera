@@ -485,6 +485,19 @@ public final class RecordingTransferTest {
         }
     }
 
+    @Test public void sameSizeInPlaceOverwriteAfterFirstChunkFailsBeforeChangedBytes() throws Exception {
+        try (Fixture f = fixture(262147)) {
+            f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
+            long modified = Files.getLastModifiedTime(f.file().toPath()).toMillis();
+            byte[] replacement = new byte[f.bytes.length]; Arrays.fill(replacement, (byte) 99);
+            Files.write(f.file().toPath(), replacement);
+            Files.setLastModifiedTime(f.file().toPath(), java.nio.file.attribute.FileTime.fromMillis(modified + 5000));
+            f.ack(1, 262144); await(() -> f.ends.get() == 1 || f.socket().binary.size() > 1);
+            assertEquals("No bytes from the modified file may be sent", 1, f.socket().binary.size());
+            await(() -> f.ends.get() == 1); assertTrue(f.catalog.leasedTripIds().isEmpty());
+        }
+    }
+
     @Test public void pausedRetransmitCannotReadReplacementIdentityAtConfirmedOffset() throws Exception {
         try (Fixture f = fixture(262147)) {
             f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
