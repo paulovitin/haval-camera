@@ -7,6 +7,9 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -43,6 +46,34 @@ public final class VideoCatalogProviderTest {
         assertFalse(metadata.contains("codec"));
         assertFalse(metadata.contains("path"));
         assertTrue(metadata.length() < 1_024);
+    }
+
+    @Test public void providerBoundsMetadataBeforeBinderAllocation() throws Exception {
+        assertTrue(VideoCatalogProvider.segmentMetadataJson(tripWithSegments(256)).length() < 1_048_576);
+        assertTrue(VideoCatalogProvider.segmentMetadataJson(tripWithSegments(4_096)).length() < 1_048_576);
+        try {
+            VideoCatalogProvider.segmentMetadataJson(tripWithSegments(4_097));
+            throw new AssertionError("Expected provider metadata bound");
+        } catch (IllegalStateException expected) {
+            assertTrue(expected.getMessage().contains("metadata"));
+        }
+    }
+
+    private static VideoCatalog.Trip tripWithSegments(int count) throws Exception {
+        Constructor<VideoCatalog.Segment> segmentConstructor = VideoCatalog.Segment.class
+                .getDeclaredConstructor(int.class, String.class, VideoCatalog.SegmentMetadata.class);
+        segmentConstructor.setAccessible(true);
+        List<VideoCatalog.Segment> segments = new ArrayList<>();
+        VideoCatalog.SegmentMetadata metadata =
+                new VideoCatalog.SegmentMetadata(1, 2, 1, 1, SHA_ONE, AVC);
+        for (int index = 1; index <= count; index++) {
+            segments.add(segmentConstructor.newInstance(index,
+                    String.format("%06d.mp4", index), metadata));
+        }
+        Constructor<VideoCatalog.Trip> tripConstructor = VideoCatalog.Trip.class.getDeclaredConstructor(
+                long.class, VideoCatalog.Source.class, long.class, Long.class, boolean.class, List.class);
+        tripConstructor.setAccessible(true);
+        return tripConstructor.newInstance(42L, VideoCatalog.Source.AUTOMATIC, 1L, 2L, true, segments);
     }
 
     private void writePartial(String tripId, String contents) throws Exception {
