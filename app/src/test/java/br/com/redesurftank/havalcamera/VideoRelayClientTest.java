@@ -248,6 +248,123 @@ public final class VideoRelayClientTest {
         }
     }
 
+    @Test public void loopbackUsesBearerAndUnchangedHvc1Transport() throws Exception {
+        for (String host : new String[] {"127.0.0.1", "[::1]"}) {
+            Fixture f = new Fixture();
+            try {
+                f.client.start(new VideoRelayClient.Session("ws://" + host + ":8765/live?session=s",
+                        "x".repeat(32), f.now.get() + 60_000));
+                assertEquals("http://" + host + ":8765/live?session=s", f.factory.requests.get(0).url().toString());
+                assertEquals("Bearer " + "x".repeat(32), f.factory.requests.get(0).header("Authorization"));
+                f.client.onCodecConfig(bytes(0x67), bytes(0x68));
+                f.client.write(new EncodedAccessUnit(bytes(0x65), 1, true, false));
+                f.factory.open(0);
+                await(() -> f.factory.sockets.get(0).binary.size() == 2);
+                assertEquals(H264WireCodec.Type.CONFIG, H264WireCodec.decode(
+                        f.factory.sockets.get(0).binary.get(0).asByteBuffer()).type);
+                assertEquals(H264WireCodec.Type.ACCESS_UNIT, H264WireCodec.decode(
+                        f.factory.sockets.get(0).binary.get(1).asByteBuffer()).type);
+            } finally { f.client.close(); }
+        }
+    }
+
+    @Test public void validatesTokenLengthAndRejectsRawOrEncodedTokenInUrl() {
+        Fixture f = new Fixture();
+        try {
+            for (int length : new int[] {32, 512}) {
+                f.client.start(new VideoRelayClient.Session("wss://bridge.example/live?session=s",
+                        "x".repeat(length), f.now.get() + 60_000));
+            }
+            for (int length : new int[] {0, 31, 513}) {
+                assertThrows(IllegalArgumentException.class, () -> f.client.start(
+                        new VideoRelayClient.Session("wss://bridge.example/live?session=s",
+                                "x".repeat(length), f.now.get() + 60_000)));
+            }
+            for (String scheme : new String[] {"wss://bridge.example", "ws://127.0.0.1:8765"}) {
+                for (String tokenPath : new String[] {"x".repeat(32), "%78".repeat(32)}) {
+                    assertThrows(IllegalArgumentException.class, () -> f.client.start(
+                            new VideoRelayClient.Session(scheme + "/" + tokenPath + "?session=s",
+                                    "x".repeat(32), f.now.get() + 60_000)));
+                }
+                assertThrows(IllegalArgumentException.class, () -> f.client.start(
+                        new VideoRelayClient.Session(scheme + "/live?session=" + "x".repeat(32),
+                                "x".repeat(32), f.now.get() + 60_000)));
+            }
+            assertEquals(2, f.factory.requests.size());
+        } finally { f.client.close(); }
+    }
+
+    @Test public void changedSessionIdentityCannotReachTransport() throws Exception {
+        Fixture f = new Fixture();
+        try {
+            VideoRelayClient.Session session = f.session("x".repeat(32));
+            java.lang.reflect.Field id = VideoRelayClient.Session.class.getDeclaredField("sessionId");
+            id.setAccessible(true); id.set(session, "different-session");
+            assertThrows(IllegalArgumentException.class, () -> f.client.start(session));
+            assertEquals(0, f.factory.requests.size());
+        } finally { f.client.close(); }
+    }
+
+    @Test public void sharedTransferValidatorStillRejectsLoopbackWs() {
+        assertThrows(IllegalArgumentException.class, () -> VideoRelayClient.validateSession(
+                new VideoRelayClient.Session("ws://127.0.0.1:8765/live?session=s", "x".repeat(32),
+                        1_700_000_060_000L), 1_700_000_000_000L));
+    }
+
+    @Test public void liveRedirectsAreDisabledWithoutChangingTransferFactory() throws Exception {
+        VideoRelayClient client = VideoRelayClient.createDefault(() -> {}, (status, detail) -> {},
+                System::currentTimeMillis);
+        okhttp3.OkHttpClient transfer = VideoRelayClient.newWebSocketClient("TransferPolicyTest");
+        try {
+            java.lang.reflect.Field factory = VideoRelayClient.class.getDeclaredField("webSockets");
+            factory.setAccessible(true);
+            okhttp3.OkHttpClient live = (okhttp3.OkHttpClient) factory.get(client);
+            assertFalse(live.followRedirects());
+            assertFalse(live.followSslRedirects());
+            assertTrue(transfer.followRedirects());
+            assertTrue(transfer.followSslRedirects());
+        } finally {
+            client.close(); transfer.dispatcher().executorService().shutdownNow();
+            transfer.connectionPool().evictAll();
+        }
+    }
+
+    @Test public void defaultLiveClientNeverFollowsRedirectToChangedSession() throws Exception {
+        try (java.net.ServerSocket origin = new java.net.ServerSocket(0, 1,
+                java.net.InetAddress.getByName("127.0.0.1"));
+                java.net.ServerSocket target = new java.net.ServerSocket(0, 1,
+                        java.net.InetAddress.getByName("127.0.0.1"))) {
+            origin.setSoTimeout(3000); target.setSoTimeout(500);
+            CountDownLatch failed = new CountDownLatch(1);
+            VideoRelayClient client = VideoRelayClient.createDefault(() -> {},
+                    (status, detail) -> { if (status == VideoRelayClient.Status.NETWORK_ERROR) failed.countDown(); },
+                    System::currentTimeMillis);
+            try {
+                client.start(new VideoRelayClient.Session("ws://127.0.0.1:" + origin.getLocalPort()
+                        + "/live?session=original", "x".repeat(32), System.currentTimeMillis() + 60_000));
+                try (java.net.Socket peer = origin.accept()) {
+                    peer.setSoTimeout(3000);
+                    java.io.BufferedReader request = new java.io.BufferedReader(new java.io.InputStreamReader(
+                            peer.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
+                    String line;
+                    while ((line = request.readLine()) != null && !line.isEmpty()) { }
+                    peer.getOutputStream().write(("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:"
+                            + target.getLocalPort() + "/live?session=changed\r\nContent-Length: 0\r\n\r\n")
+                            .getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    peer.getOutputStream().flush();
+                }
+                // Any connection to the redirect target is already a policy violation.
+                assertThrows(java.net.SocketTimeoutException.class, () -> {
+                    try (java.net.Socket unexpected = target.accept()) {
+                        throw new AssertionError("Live client followed redirect");
+                    }
+                });
+                assertTrue(failed.await(3, TimeUnit.SECONDS));
+                assertFalse(client.hasActiveCredentials());
+            } finally { client.close(); }
+        }
+    }
+
     private static final class Fixture {
         final AtomicLong now = new AtomicLong(1_700_000_000_000L);
         final FakeFactory factory = new FakeFactory();
