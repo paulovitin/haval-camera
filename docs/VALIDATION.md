@@ -84,7 +84,7 @@ Nenhuma correção especulativa de modo, caminho, pipe ou muxer foi aplicada. A 
 
 Evidência posterior da mesma execução confirmou cerca de 2,4 GiB livres com a reserva configurada em 5 GiB. O gate de `SegmentMuxer` recusou a gravação antes de criar `current.partial` com `Reserva de armazenamento indisponível`; a falha posterior `Muxer is closed` substituiu essa causa na notificação. Isso identifica a reserva, e não o modo de dump OEM, como a causa da ausência do arquivo parcial nessa tentativa específica.
 
-A correção mantém 5, 10 e 20 GiB para instalações que já escolheram esses valores, aceita também 1 GiB e usa 1 GiB somente quando `reserveGb` ainda não existe. O reducer mantém a primeira falha do pipeline até um novo início normal limpar o erro. A verificação de software não substitui uma nova gravação física no Android 9; criação, finalização e reprodução de segmentos continuam pendentes no veículo.
+A correção mantém 5, 10 e 20 GiB para instalações que já escolheram valores válidos, aceita também 1 GiB e usa 1 GiB quando `reserveGb` está ausente ou contém um valor inválido. O reducer mantém a primeira falha do pipeline até um novo início normal limpar o erro. A verificação de software não substitui uma nova gravação física no Android 9; criação, finalização e reprodução de segmentos continuam pendentes no veículo.
 
 ## Ciclo foreground, galeria e compartilhamento local
 
