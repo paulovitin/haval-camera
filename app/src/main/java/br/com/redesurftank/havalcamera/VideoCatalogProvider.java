@@ -26,6 +26,8 @@ public final class VideoCatalogProvider extends ContentProvider {
     private static volatile UriMatcher uriMatcher;
     private VideoCatalog catalog;
     private VideoSettings settings;
+    private static final int MAX_CATALOG_SEGMENTS = 4_096;
+    private static final int MAX_METADATA_CHARS = 1_048_576;
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
 
     @Override public boolean onCreate() {
@@ -43,15 +45,25 @@ public final class VideoCatalogProvider extends ContentProvider {
         MatrixCursor cursor = new MatrixCursor(new String[]{"trip_id","source","start_ms","end_ms",
                 "byte_size","segments","segment_metadata_json"});
         for (VideoCatalog.Trip trip : catalog.completedSnapshot()) {
-            long bytes = 0;
-            for (VideoCatalog.Segment segment : trip.segments) bytes = Math.addExact(bytes, segment.byteSize);
-            cursor.addRow(new Object[]{trip.tripId, trip.source.name().toLowerCase(), trip.startMs,
-                    trip.endMs, bytes, trip.segments.size(), segmentMetadataJson(trip)});
+            try {
+                String metadata = segmentMetadataJson(trip);
+                long bytes = 0;
+                for (VideoCatalog.Segment segment : trip.segments) {
+                    bytes = Math.addExact(bytes, segment.byteSize);
+                }
+                cursor.addRow(new Object[]{trip.tripId, trip.source.name().toLowerCase(), trip.startMs,
+                        trip.endMs, bytes, trip.segments.size(), metadata});
+            } catch (ArithmeticException | IllegalStateException invalid) {
+                // A malformed or oversized completed trip is not exposed over Binder.
+            }
         }
         return cursor;
     }
 
     static String segmentMetadataJson(VideoCatalog.Trip trip) {
+        if (trip.segments.isEmpty() || trip.segments.size() > MAX_CATALOG_SEGMENTS) {
+            throw new IllegalStateException("Invalid completed segment metadata count");
+        }
         StringBuilder json = new StringBuilder("[");
         for (int index = 0; index < trip.segments.size(); index++) {
             VideoCatalog.Segment segment = trip.segments.get(index);
@@ -64,6 +76,9 @@ public final class VideoCatalogProvider extends ContentProvider {
                     .append(",\"byteSize\":").append(segment.byteSize)
                     .append(",\"sha256\":\"").append(segment.sha256.toLowerCase(Locale.US))
                     .append("\"}");
+            if (json.length() + 1 > MAX_METADATA_CHARS) {
+                throw new IllegalStateException("Completed segment metadata too large");
+            }
         }
         return json.append(']').toString();
     }
