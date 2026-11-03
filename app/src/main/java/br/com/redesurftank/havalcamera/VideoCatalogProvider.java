@@ -23,11 +23,7 @@ import java.util.regex.Pattern;
 public final class VideoCatalogProvider extends ContentProvider {
     public static final String AUTHORITY = "br.com.redesurftank.havalcamera.video";
     private static final int TRIPS = 1, SEGMENT = 2;
-    private static final UriMatcher MATCHER = new UriMatcher(UriMatcher.NO_MATCH);
-    static {
-        MATCHER.addURI(AUTHORITY, "trips", TRIPS);
-        MATCHER.addURI(AUTHORITY, "trips/#/segments/#", SEGMENT);
-    }
+    private static volatile UriMatcher uriMatcher;
     private VideoCatalog catalog;
     private VideoSettings settings;
     private static final Pattern SHA_256 = Pattern.compile("[0-9a-f]{64}");
@@ -43,7 +39,7 @@ public final class VideoCatalogProvider extends ContentProvider {
     @Override public Cursor query(Uri uri, String[] projection, String selection,
             String[] selectionArgs, String sortOrder) {
         enforce(VideoContract.READ_PERMISSION);
-        if (MATCHER.match(uri) != TRIPS) throw new IllegalArgumentException("Unknown read-only URI");
+        if (matcher().match(uri) != TRIPS) throw new IllegalArgumentException("Unknown read-only URI");
         MatrixCursor cursor = new MatrixCursor(new String[]{"trip_id","source","start_ms","end_ms",
                 "byte_size","segments","segment_metadata_json"});
         for (VideoCatalog.Trip trip : catalog.completedSnapshot()) {
@@ -74,7 +70,7 @@ public final class VideoCatalogProvider extends ContentProvider {
 
     @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
         enforce(VideoContract.READ_PERMISSION);
-        if (!"r".equals(mode) || MATCHER.match(uri) != SEGMENT) throw new FileNotFoundException("Read only");
+        if (!"r".equals(mode) || matcher().match(uri) != SEGMENT) throw new FileNotFoundException("Read only");
         try {
             String tripId = uri.getPathSegments().get(1);
             File file = catalog.completedSegmentFile(tripId, uri.getLastPathSegment());
@@ -139,7 +135,20 @@ public final class VideoCatalogProvider extends ContentProvider {
 
     @Override public String getType(Uri uri) {
         enforce(VideoContract.READ_PERMISSION);
-        return MATCHER.match(uri) == TRIPS ? "vnd.android.cursor.dir/vnd.havalcamera.trip" : "video/mp4";
+        return matcher().match(uri) == TRIPS ? "vnd.android.cursor.dir/vnd.havalcamera.trip" : "video/mp4";
+    }
+    private static UriMatcher matcher() {
+        UriMatcher current = uriMatcher;
+        if (current != null) return current;
+        synchronized (VideoCatalogProvider.class) {
+            if (uriMatcher == null) {
+                UriMatcher created = new UriMatcher(UriMatcher.NO_MATCH);
+                created.addURI(AUTHORITY, "trips", TRIPS);
+                created.addURI(AUTHORITY, "trips/#/segments/#", SEGMENT);
+                uriMatcher = created;
+            }
+            return uriMatcher;
+        }
     }
     private void enforce(String permission) {
         if (android.os.Binder.getCallingUid() != Process.myUid())
