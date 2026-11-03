@@ -11,7 +11,6 @@ import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.Process;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.util.HashMap;
@@ -102,6 +101,10 @@ public final class VideoCatalogProvider extends ContentProvider {
     }
 
     @Override public Bundle call(String method, String arg, Bundle extras) {
+        if ("command".equals(method)) {
+            enforce(VideoContract.CONTROL_PERMISSION);
+            return CameraCommandGateway.dispatch(getContext(), arg, extras);
+        }
         if ("getSettings".equals(method)) {
             enforce(VideoContract.READ_PERMISSION);
             return settingsBundle(settings.snapshot(), settings.revision(), true);
@@ -166,8 +169,7 @@ public final class VideoCatalogProvider extends ContentProvider {
         }
     }
     private void enforce(String permission) {
-        if (android.os.Binder.getCallingUid() != Process.myUid())
-            getContext().enforceCallingPermission(permission, "Missing signature permission");
+        TrustedCallerVerifier.enforce(getContext());
     }
     @Override public Uri insert(Uri uri, ContentValues values) { enforce(VideoContract.CONTROL_PERMISSION); throw new UnsupportedOperationException("Read only"); }
     @Override public int delete(Uri uri, String selection, String[] selectionArgs) { enforce(VideoContract.CONTROL_PERMISSION); throw new UnsupportedOperationException("Read only"); }

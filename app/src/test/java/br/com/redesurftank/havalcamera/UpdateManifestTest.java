@@ -5,7 +5,7 @@ import static org.junit.Assert.*;
 
 public class UpdateManifestTest {
     static final String HASH = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-    static final String JSON = "{\"schemaVersion\":1,\"versionCode\":3,\"versionName\":\"0.3\",\"apk\":\"haval-camera.apk\",\"size\":3,\"sha256\":\"" + HASH + "\"}";
+    static final String JSON = "{\"schemaVersion\":1,\"versionCode\":4,\"versionName\":\"0.4\",\"apk\":\"haval-camera.apk\",\"size\":3,\"sha256\":\"" + HASH + "\"}";
     static String asset(String name) {
         return "{\"name\":\""+name+"\",\"browser_download_url\":\"https://github.com/rafaelcs28/haval-camera/releases/download/v3/"+name+"\"}";
     }
@@ -15,7 +15,7 @@ public class UpdateManifestTest {
     @Test public void ordersOnlyByVersionCode() {
         UpdateManifest m = UpdateManifest.parse(JSON); assertNotNull(m);
         assertTrue(m.isNewerThan(2)); assertFalse(m.isNewerThan(3)); assertFalse(m.isNewerThan(4));
-        assertEquals("0.3", m.versionName); assertEquals(3, m.size);
+        assertEquals("0.4", m.versionName); assertEquals(3, m.size);
     }
     @Test public void rejectsUnknownSchemaMissingDuplicateAndExtraFields() {
         for (String json : new String[]{JSON.replace("schemaVersion\":1", "schemaVersion\":2"),
@@ -26,12 +26,12 @@ public class UpdateManifestTest {
         for (String json : new String[]{JSON.replace("size\":3", "size\":0"), JSON.replace("size\":3", "size\":-1"),
                 JSON.replace("size\":3", "size\":1073741825"), JSON.replace(HASH, HASH.toUpperCase()),
                 JSON.replace(HASH, "abc"), JSON.replace("haval-camera.apk", "../bad.apk"),
-                JSON.replace("versionCode\":3", "versionCode\":2147483648"), JSON.replace("\"0.3\"", "\"\"")}) reject(json);
+                JSON.replace("versionCode\":4", "versionCode\":2147483648"), JSON.replace("\"0.4\"", "\"\"")}) reject(json);
     }
     @Test public void rejectsMalformedJsonAndWrongTypes() {
         for (String json : new String[]{"null", "[]", JSON.replace("size\":3", "size\":\"3\""),
                 JSON.replace("size\":3", "size\":03"), JSON.replace("size\":3", "size\":3e0"),
-                JSON.replace("0.3", "bad\nname"), JSON.replace("}", ",}"), JSON.substring(1)}) reject(json);
+                JSON.replace("0.4", "bad\nname"), JSON.replace("}", ",}"), JSON.substring(1)}) reject(json);
     }
     @Test public void stableExcludesPrereleaseAndDraft() {
         String pre = release(true, asset("update-manifest.json"));

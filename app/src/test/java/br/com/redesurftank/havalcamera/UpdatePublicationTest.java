@@ -20,7 +20,7 @@ public class UpdatePublicationTest {
             Files.write(apk,"abc".getBytes(StandardCharsets.UTF_8));
             executable(dir.resolve("apksigner"),"echo 'Signer #1 certificate SHA-256 digest: "+(badCert?"bad":UpdateVerifier.APPROVED_CERT)+"'\n");
             executable(dir.resolve("zipalign"),"exit 0\n"); executable(dir.resolve("unzip"),"exit 0\n");
-            executable(dir.resolve("aapt"),"echo \"package: name='"+(badPackage?"other.app":"br.com.redesurftank.havalcamera")+"' versionCode='3' versionName='0.3'\"\n");
+            executable(dir.resolve("aapt"),"echo \"package: name='"+(badPackage?"other.app":"br.com.redesurftank.havalcamera")+"' versionCode='4' versionName='0.4'\"\n");
             ProcessBuilder pb = new ProcessBuilder("bash",script.getCanonicalPath(),apk.toString(),result.toString(),dir.toString());
             pb.environment().put("PATH",dir+File.pathSeparator+System.getenv("PATH"));
             pb.redirectErrorStream(true); Process process = pb.start();
@@ -30,7 +30,7 @@ public class UpdatePublicationTest {
             else {
                 assertEquals(output,0,rc);
                 UpdateManifest manifest = UpdateManifest.parse(new String(Files.readAllBytes(result),StandardCharsets.UTF_8));
-                assertEquals(3,manifest.versionCode); assertEquals("0.3",manifest.versionName);
+                assertEquals(4,manifest.versionCode); assertEquals("0.4",manifest.versionName);
                 assertEquals(3,manifest.size); assertEquals(UpdateManifestTest.HASH,manifest.sha256);
                 assertEquals("haval-camera.apk",manifest.apk);
             }

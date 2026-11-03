@@ -222,6 +222,7 @@ public final class TripVideoService extends Service {
 
     private void acknowledge(String requestId, long requestRevision, long cameraRevision,
             String status, String error) {
+        CameraCommandGateway.complete(requestId, requestRevision, cameraRevision, status, error);
         Intent result = new Intent(VideoContract.ACTION_COMMAND_RESULT)
                 .setPackage("br.com.redesurftank.ecotrip")
                 .putExtra(VideoContract.EXTRA_PROTOCOL_VERSION, VideoContract.PROTOCOL_VERSION)

@@ -44,10 +44,8 @@ public final class CameraCaptureClient implements AutoCloseable {
     private boolean closed;
 
     private final Shizuku.OnBinderReceivedListener binderReceived = this::connect;
-    private final Shizuku.OnBinderDeadListener binderDead = () -> {
-        stop();
-        report(State.DISCONNECTED, null);
-    };
+    private final Runnable reconnect = this::connect;
+    private final Shizuku.OnBinderDeadListener binderDead = () -> retryAfterDisconnect("Shizuku disconnected");
     private final Shizuku.OnRequestPermissionResultListener permissionResult = (request, grant) -> {
         synchronized (this) {
             permissionPending = false;
@@ -75,12 +73,7 @@ public final class CameraCaptureClient implements AutoCloseable {
         }
 
         @Override public void onServiceDisconnected(ComponentName name) {
-            synchronized (CameraCaptureClient.this) {
-                service = null;
-                binding = false;
-                generation++;
-            }
-            report(State.DISCONNECTED, null);
+            retryAfterDisconnect("Camera service disconnected");
         }
     };
 
@@ -158,8 +151,7 @@ public final class CameraCaptureClient implements AutoCloseable {
         } catch (Exception failure) {
             Log.e("HavalCamera", "Stream ended", failure);
             if (run == generation) {
-                stop();
-                report(State.ERROR, failure.getMessage());
+                retryAfterDisconnect(failure.getMessage());
             }
         } finally {
             if (run == generation) input = null;
@@ -168,6 +160,7 @@ public final class CameraCaptureClient implements AutoCloseable {
 
     public synchronized void stop() {
         started = false;
+        main.removeCallbacks(reconnect);
         consumer = null;
         generation++;
         try {
@@ -188,6 +181,36 @@ public final class CameraCaptureClient implements AutoCloseable {
             }
         }
         binding = false;
+    }
+
+    private void retryAfterDisconnect(String detail) {
+        synchronized (this) {
+            if (!started || closed) return;
+            generation++;
+            ICameraStream oldService = service;
+            service = null;
+            boolean wasBinding = binding;
+            binding = false;
+            try {
+                if (input != null) input.close();
+            } catch (Exception ignored) { }
+            input = null;
+            try {
+                if (oldService != null) oldService.stop();
+            } catch (Exception failure) {
+                Log.w("HavalCamera", "Stop before reconnect", failure);
+            }
+            if (wasBinding && Shizuku.pingBinder()) {
+                try {
+                    Shizuku.unbindUserService(args, connection, true);
+                } catch (Exception failure) {
+                    Log.w("HavalCamera", "Unbind before reconnect", failure);
+                }
+            }
+            main.removeCallbacks(reconnect);
+            main.postDelayed(reconnect, 1_000);
+        }
+        report(State.DISCONNECTED, detail);
     }
 
     private void report(State state, String detail) {

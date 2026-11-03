@@ -43,8 +43,6 @@
         <service android:name=".LocalVideoActionService" android:exported="false" />
         <provider android:name=".VideoCatalogProvider"
             android:authorities="br.com.redesurftank.havalcamera.video"
-            android:exported="true"
-            android:readPermission="br.com.redesurftank.havalcamera.permission.READ_VIDEO"
-            android:writePermission="br.com.redesurftank.havalcamera.permission.CONTROL" />
+            android:exported="true" />
     </application>
 </manifest>

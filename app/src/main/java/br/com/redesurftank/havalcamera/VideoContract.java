@@ -100,4 +100,12 @@ public final class VideoContract {
     public static void requireConfirmedDelete(boolean confirmed) {
         if (!confirmed) throw new IllegalArgumentException("Completed-recording deletion is not confirmed");
     }
+
+    public static boolean isExternalCommandAction(String action) {
+        return ACTION_START_TRIP.equals(action) || ACTION_STOP_TRIP.equals(action)
+                || ACTION_DISCARD_TRIP.equals(action) || ACTION_RECONCILE.equals(action)
+                || ACTION_START_LIVE.equals(action) || ACTION_STOP_LIVE.equals(action)
+                || ACTION_TRANSFER.equals(action) || ACTION_CANCEL_TRANSFER.equals(action)
+                || ACTION_TELEMETRY_SAMPLE.equals(action) || ACTION_DELETE_COMPLETED.equals(action);
+    }
 }

@@ -24,8 +24,8 @@ android {
         applicationId = "br.com.redesurftank.havalcamera"
         minSdk = 28
         targetSdk = 28
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild {
             cmake { targets += "camera_stream" }

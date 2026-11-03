@@ -14,7 +14,7 @@ import org.w3c.dom.NodeList;
 public final class IpcPermissionContractTest {
     private static final String ANDROID = "http://schemas.android.com/apk/res/android";
 
-    @Test public void cameraOwnsAndRequestsTheExactControlPermissionUsedForResults() throws Exception {
+    @Test public void serviceRemainsSignatureProtectedAndProviderUsesPinnedCallerVerification() throws Exception {
         Path sourceRoot = Files.exists(Path.of("src/main/AndroidManifest.xml"))
                 ? Path.of("src/main") : Path.of("app/src/main");
         Path manifestPath = sourceRoot.resolve("AndroidManifest.xml");
@@ -26,10 +26,24 @@ public final class IpcPermissionContractTest {
         assertTrue(hasPermission(manifest, "permission", VideoContract.CONTROL_PERMISSION));
         assertTrue(hasPermission(manifest, "uses-permission", VideoContract.CONTROL_PERMISSION));
 
+        NodeList providers = manifest.getElementsByTagName("provider");
+        Element catalog = null;
+        for (int index = 0; index < providers.getLength(); index++) {
+            Element value = (Element) providers.item(index);
+            if (".VideoCatalogProvider".equals(value.getAttributeNS(ANDROID, "name"))) catalog = value;
+        }
+        assertTrue(catalog != null);
+        assertEquals("", catalog.getAttributeNS(ANDROID, "readPermission"));
+        assertEquals("", catalog.getAttributeNS(ANDROID, "writePermission"));
+
         String service = new String(Files.readAllBytes(sourceRoot.resolve(
                 "java/br/com/redesurftank/havalcamera/TripVideoService.java")),
                 StandardCharsets.UTF_8);
+        String provider = new String(Files.readAllBytes(sourceRoot.resolve(
+                "java/br/com/redesurftank/havalcamera/VideoCatalogProvider.java")),
+                StandardCharsets.UTF_8);
         assertTrue(service.contains("sendBroadcast(result, VideoContract.CONTROL_PERMISSION);"));
+        assertTrue(provider.contains("TrustedCallerVerifier.enforce(getContext())"));
         assertEquals("br.com.redesurftank.havalcamera.permission.CONTROL",
                 VideoContract.CONTROL_PERMISSION);
     }
