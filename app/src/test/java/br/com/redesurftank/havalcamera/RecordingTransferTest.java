@@ -258,7 +258,11 @@ public final class RecordingTransferTest {
         try (Fixture f = fixture(3)) {
             Method open = VideoCatalog.class.getMethod("openTransferSegment", VideoCatalog.ReadLease.class, String.class);
             VideoCatalog.ReadLease lease = f.catalog.acquireReadLease("42");
-            try (RandomAccessFile file = (RandomAccessFile) invoke(open, f.catalog, lease, "1")) { assertEquals(3, file.length()); }
+            try (AutoCloseable file = (AutoCloseable) invoke(open, f.catalog, lease, "1")) {
+                long length = file instanceof RandomAccessFile ? ((RandomAccessFile) file).length()
+                        : ((java.nio.channels.FileChannel) file).size();
+                assertEquals(3, length);
+            }
             lease.close();
             assertThrows(Exception.class, () -> invoke(open, f.catalog, lease, "1"));
             VideoCatalog other = new VideoCatalog(temporary.newFolder());
@@ -418,6 +422,113 @@ public final class RecordingTransferTest {
                 assertTrue(f.file().isFile()); assertTrue(f.catalog.leasedTripIds().isEmpty());
             }
         }
+    }
+
+    @Test public void retentionReplansStaleSelectionAfterTransferLeaseAndDeletesOtherCandidate() throws Exception {
+        try (Fixture f = fixture(3)) {
+            addCompletedTrip(f, "43", 3000, new byte[]{3, 4, 5});
+            List<RetentionPlanner.Entry> entries = List.of(
+                    new RetentionPlanner.Entry(42, 1000, List.of(3L), true),
+                    new RetentionPlanner.Entry(43, 3000, List.of(3L), true));
+            RetentionPlanner.Plan stale = RetentionPlanner.selectDeletions(entries, 0, 3, true,
+                    null, f.catalog.leasedTripIds());
+            assertEquals(List.of(42L), stale.tripIds);
+            // Precisely the reviewed interleaving: transfer leases the old selection before deletion.
+            f.start(true); f.open();
+            File alternative = new File(f.root, "trip-video/43");
+            enforceReserve(f.catalog, () -> alternative.exists() ? 0L : 3L, 3, true);
+            assertTrue(f.file().isFile()); assertFalse(alternative.exists());
+            assertTrue(f.catalog.leasedTripIds().contains(42L)); assertEquals(0, f.ends.get());
+            f.resume(0); f.awaitFrames(1); assertArrayEquals(new byte[]{0, 1, 2}, f.message(0).payload);
+        }
+    }
+
+    @Test public void retentionCannotRecoverReserveFromLeasedOrActiveTrips() throws Exception {
+        try (Fixture f = fixture(3)) {
+            f.start(true); f.open();
+            f.catalog.beginTrip("43", 3000, VideoCatalog.Source.MANUAL);
+            Files.write(new File(f.root, "trip-video/43/current.partial").toPath(), new byte[]{3, 4, 5});
+            assertThrows(IOException.class, () -> enforceReserve(f.catalog, () -> 0L, 3, true));
+            assertTrue(f.file().isFile()); assertTrue(new File(f.root, "trip-video/43/current.partial").isFile());
+            assertEquals(0, f.ends.get());
+        }
+    }
+
+    @Test public void retentionPreservesDisabledDeletionAndActualFreeSpaceGate() throws Exception {
+        try (Fixture f = fixture(3)) {
+            addCompletedTrip(f, "43", 3000, new byte[]{3, 4, 5}); f.start(true); f.open();
+            assertThrows(IOException.class, () -> enforceReserve(f.catalog, () -> 0L, 3, false));
+            assertTrue(new File(f.root, "trip-video/43/000001.mp4").isFile());
+            // Deletion estimates cannot authorize recording if the real free-space query stays below reserve.
+            assertThrows(IOException.class, () -> enforceReserve(f.catalog, () -> 0L, 3, true));
+            assertTrue(f.file().isFile()); assertEquals(0, f.ends.get());
+        }
+    }
+
+    @Test public void replacingSegmentAfterFirstChunkNeverSendsReplacementBytes() throws Exception {
+        try (Fixture f = fixture(262147)) {
+            f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
+            byte[] replacement = new byte[f.bytes.length]; Arrays.fill(replacement, (byte) 99);
+            File swapped = new File(f.root, "replacement.mp4"); Files.write(swapped.toPath(), replacement);
+            Files.move(swapped.toPath(), f.file().toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            f.ack(1, 262144);
+            await(() -> f.ends.get() == 1 || f.socket().binary.size() > 1);
+            if (f.socket().binary.size() > 1) {
+                assertEquals(TransferChunkCodec.Type.DATA, f.message(1).type);
+                assertArrayEquals("Only the original verified identity may continue",
+                        Arrays.copyOfRange(f.bytes, 262144, 262147), f.message(1).payload);
+                f.ack(1, 262147); f.awaitFrames(3);
+                assertArrayEquals(hash(f.bytes), f.message(2).sha256);
+                f.ack(1, 262147);
+            }
+            await(() -> f.ends.get() == 1); assertTrue(f.catalog.leasedTripIds().isEmpty());
+        }
+    }
+
+    @Test public void pausedRetransmitCannotReadReplacementIdentityAtConfirmedOffset() throws Exception {
+        try (Fixture f = fixture(262147)) {
+            f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
+            f.text("{\"type\":\"pause\",\"reason\":\"live\"}");
+            byte[] replacement = new byte[f.bytes.length]; Arrays.fill(replacement, (byte) 99);
+            File swapped = new File(f.root, "replacement.mp4"); Files.write(swapped.toPath(), replacement);
+            Files.move(swapped.toPath(), f.file().toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            f.resume(0); await(() -> f.ends.get() == 1 || f.socket().binary.size() > 1);
+            if (f.socket().binary.size() > 1) assertArrayEquals(
+                    Arrays.copyOfRange(f.bytes, 0, 262144), f.message(1).payload);
+            assertEquals("0", f.offsets().get("1"));
+        }
+    }
+
+    @Test public void symlinkAndSizeReplacementAfterFirstChunkStillFailClosed() throws Exception {
+        for (boolean symlink : new boolean[]{true, false}) {
+            try (Fixture f = fixture(262147)) {
+                f.start(true); f.open(); f.resume(0); f.awaitFrames(1);
+                Files.delete(f.file().toPath());
+                if (symlink) {
+                    File target = new File(f.root, "target.mp4"); Files.write(target.toPath(), f.bytes);
+                    Files.createSymbolicLink(f.file().toPath(), target.toPath());
+                } else Files.write(f.file().toPath(), new byte[2]);
+                f.ack(1, 262144); await(() -> f.ends.get() == 1);
+                assertEquals(1, f.socket().binary.size()); assertTrue(f.catalog.leasedTripIds().isEmpty());
+                assertEquals("262144", f.offsets().get("1"));
+            }
+        }
+    }
+
+    private static void addCompletedTrip(Fixture f, String id, long start, byte[] bytes) throws Exception {
+        f.catalog.beginTrip(id, start, VideoCatalog.Source.MANUAL);
+        Files.write(new File(f.root, "trip-video/" + id + "/current.partial").toPath(), bytes);
+        f.catalog.completeSegment(id, new VideoCatalog.SegmentMetadata(start, start + 1000, 1000000,
+                bytes.length, hex(hash(bytes)), new VideoCatalog.Codec("video/avc", 1760, 720, 15, 4000000)));
+        f.catalog.completeTrip(id, start + 1000);
+    }
+
+    private static void enforceReserve(VideoCatalog catalog, LongSupplier free, long reserve, boolean deletion) throws Exception {
+        Method method;
+        try { method = VideoCatalog.class.getMethod("enforceStorageReserve", LongSupplier.class,
+                long.class, boolean.class, Long.class); }
+        catch (NoSuchMethodException missing) { throw new AssertionError("Atomic catalog reserve gate is missing", missing); }
+        invoke(method, catalog, free, reserve, deletion, null);
     }
 
     private Fixture fixture(int... sizes) throws Exception { return new Fixture(temporary.newFolder(), sizes); }
