@@ -94,12 +94,14 @@ The authenticated WebSocket credentials supply transfer session identity; no ses
 | 5 | 1 | type | `01` DATA, `02` EOF, `03` ACK, `04` ERROR |
 | 6 | 2 | flags | `00 00`; no flags are defined in version 1 |
 | 8 | 4 | segment ordinal | u32, 0 through 4,294,967,295 at the codec boundary |
-| 12 | 8 | offset | u64; supported range 0 through 9,223,372,036,854,775,807 |
+| 12 | 8 | offset | u64, 0 through 18,446,744,073,709,551,615; all 64 bits preserved |
 | 20 | 4 | payload length | u32, constrained by message type below |
 | 24 | 32 | SHA-256 | raw digest bytes, never hexadecimal text |
 | 56 | payload length | payload | DATA bytes or ERROR UTF-8 text; absent for EOF/ACK |
 
-All multibyte values are big-endian. The offset's high bit must be zero in version 1 so offsets, file sizes, and arithmetic fit a non-negative Java/Swift signed 64-bit value. Node must retain exact 64-bit integers (for example, `BigInt`), without rounding through a JavaScript `Number`. DATA also requires `offset + payloadLength <= 9,223,372,036,854,775,807`; reject overflow before addition. The Java `int ordinal` parameters carry raw u32 bits: `-1` encodes `ff ff ff ff`; decoded `Message.ordinal` is the unsigned `long` value 4,294,967,295. A consumer still rejects any ordinal absent from its selected catalog.
+All multibyte values are big-endian. Every offset bit pattern is valid at the numeric codec boundary, including values with the high bit set. Java encoder offset parameters and decoded `Message.offset` carry raw u64 bits in a `long`: `Long.MIN_VALUE` represents 9,223,372,036,854,775,808 (`80 00 00 00 00 00 00 00`), and `-1L` represents maximum u64 (`ff ff ff ff ff ff ff ff`). Signed-negative representations must not be rejected merely for their sign. Use unsigned comparison/formatting in Java, `UInt64` in Swift, and exact `BigInt` in Node, without rounding through a JavaScript `Number`. Local file APIs and catalog membership impose consumer-level checks without narrowing this wire domain.
+
+DATA requires the unsigned mathematical sum `offset + payloadLength <= 18,446,744,073,709,551,615`. Crossing the signed-long boundary is valid; wrapping past maximum u64 is invalid. Check before addition with unsigned `offset > maximumU64 - payloadLength` (Java: `Long.compareUnsigned(offset, -1L - payloadLength) > 0`). For a three-byte payload, offset `ff ff ff ff ff ff ff fc` is valid and ends at maximum u64, while offsets `ff ff ff ff ff ff ff fd` through `ff ff ff ff ff ff ff ff` overflow. The Java `int ordinal` parameters carry raw u32 bits: `-1` encodes `ff ff ff ff`; decoded `Message.ordinal` is the unsigned `long` value 4,294,967,295. A consumer still rejects any ordinal absent from its selected catalog.
 
 | Type | Offset meaning | Payload | SHA-256 |
 | --- | --- | --- | --- |
@@ -116,7 +118,7 @@ An ACK confirms that every byte before `nextOffset` in that segment is durably p
 
 ### Transfer failure and close behavior
 
-A wrong magic/version/type, any nonzero flag, unsupported unsigned offset, overflow, invalid per-type field/length/digest, truncated header or payload, invalid UTF-8, or trailing byte rejects the entire message. Never persist bytes or advance an ACK after rejection. The Java decoder throws `IllegalArgumentException` and leaves the caller's buffer position, limit, mark, and byte order unchanged on both success and failure. It reads only the remaining bytes, including direct/read-only buffers. Encoders return a buffer at position zero with limit equal to the full frame length; payloads and digests are copied, and decoding returns arrays independent of the input buffer.
+A wrong magic/version/type, any nonzero flag, unsigned DATA end-offset overflow, invalid per-type field/length/digest, truncated header or payload, invalid UTF-8, or trailing byte rejects the entire message. ERROR still requires offset zero. Never persist bytes or advance an ACK after rejection. The Java decoder throws `IllegalArgumentException` and leaves the caller's buffer position, limit, mark, and byte order unchanged on both success and failure. It reads only the remaining bytes, including direct/read-only buffers. Encoders return a buffer at position zero with limit equal to the full frame length; payloads and digests are copied, and decoding returns arrays independent of the input buffer.
 
 The transport consumer must close malformed or unsupported messages with code `4004`. It must not try to send an ERROR in response to malformed/untrusted framing. Existing authentication/session close codes above retain their meanings. A valid ERROR terminates the current transfer attempt without acknowledging further bytes; the consumer ends the session normally with `4000` and preserves the last durably verified offset for any newly authorized retry. A successfully verified EOF completes its named segment; the session ends normally with `4000` once all requested segments are complete. Network loss never implies an ACK; retries require fresh scoped credentials. These are consumer requirements; this codec implements no sockets, sessions, credentials, files, or retries.
 
@@ -146,4 +148,16 @@ ERROR, ordinal 1, offset 0, UTF-8 message `abc`:
 
 ```text
 485654310104000000000001000000000000000000000003ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad616263
+```
+
+ACK unsigned boundary, ordinal 1, nextOffset 9,223,372,036,854,775,808 (Java `Long.MIN_VALUE`), zero payload and digest:
+
+```text
+4856543101030000000000018000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+```
+
+ACK maximum u64, ordinal 1, nextOffset 18,446,744,073,709,551,615 (Java `-1L`), zero payload and digest:
+
+```text
+485654310103000000000001ffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000
 ```

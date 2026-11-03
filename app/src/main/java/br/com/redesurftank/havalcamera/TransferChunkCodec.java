@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-/** Encoder and strict decoder for HVT1 version 1 segment transfer messages. */
+/** Encoder and strict decoder for HVT1 version 1; offsets carry raw u64 bits in Java long. */
 public final class TransferChunkCodec {
     public static final int MAGIC = 0x48565431; // HVT1
     public static final int VERSION = 1;
@@ -118,12 +118,11 @@ public final class TransferChunkCodec {
     }
 
     private static void requireFields(Type type, long offset, long payloadLength) {
-        if (offset < 0) throw new IllegalArgumentException("HVT1 offset exceeds supported u64 range");
         if (type == Type.DATA) {
             if (payloadLength < 1 || payloadLength > MAX_DATA_BYTES) {
                 throw new IllegalArgumentException("DATA requires 1 to 262144 bytes");
             }
-            if (offset > Long.MAX_VALUE - payloadLength) {
+            if (Long.compareUnsigned(offset, -1L - payloadLength) > 0) {
                 throw new IllegalArgumentException("DATA end offset overflows");
             }
         } else if (type == Type.ERROR) {
