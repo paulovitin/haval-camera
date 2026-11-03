@@ -1,16 +1,14 @@
 package br.com.redesurftank.havalcamera;
 
-import android.app.Activity;
+import android.content.Intent;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.ServiceConnection;
-import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.ParcelFileDescriptor;
+import android.os.Handler;
 import android.os.SystemClock;
-import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -18,30 +16,23 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.io.DataInputStream;
-import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import rikka.shizuku.Shizuku;
 
-public final class CameraActivity extends Activity {
+public final class CameraActivity extends BackNavigationActivity {
     private final Handler handler = new Handler();
     private CameraPreview preview;
     private TextView status;
-    private ICameraStream service;
-    private Shizuku.UserServiceArgs args;
-    private volatile DataInputStream input;
-    private volatile int generation;
+    private TripVideoService.LocalBinder service;
+    private FrameRouter.Subscription previewSubscription;
+    private boolean bound;
     private volatile long lastFrame;
-    private boolean active, binding, permissionPending;
-    private final Shizuku.OnBinderReceivedListener binderReceived = this::connect;
-    private final Shizuku.OnBinderDeadListener binderDead = () -> {
-        stopStream(); status.setText("Shizuku desconectado. Abra-o e toque em Conectar.");
-    };
-    private final Shizuku.OnRequestPermissionResultListener permissionResult = (request, grant) -> {
-        permissionPending = false;
-        if (grant == PackageManager.PERMISSION_GRANTED) connect();
-        else status.setText("Autorize o acesso pelo Shizuku para abrir a câmera.");
+    private boolean active;
+    private final ServiceConnection connection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = (TripVideoService.LocalBinder) binder; startStream();
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            service = null; stopStream();
+        }
     };
 
     private final Runnable monitor = new Runnable() {
@@ -51,20 +42,6 @@ public final class CameraActivity extends Activity {
                 preview.clear(); status.setText("Sem imagem da câmera. Toque em Conectar para tentar novamente.");
             }
             handler.postDelayed(this, 1000);
-        }
-    };
-
-    private final ServiceConnection connection = new ServiceConnection() {
-        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
-            if (!active) { Shizuku.unbindUserService(args, this, true); return; }
-            service = ICameraStream.Stub.asInterface(binder);
-            int run = ++generation;
-            ICameraStream remote = service;
-            new Thread(() -> readFrames(remote, run), "CameraFrames").start();
-        }
-        @Override public void onServiceDisconnected(ComponentName name) {
-            service = null; binding = false; generation++;
-            preview.clear(); status.setText("Captura encerrada. Toque em Conectar.");
         }
     };
 
@@ -83,83 +60,49 @@ public final class CameraActivity extends Activity {
         layout.addView(status,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.LEFT));
         LinearLayout actions = new LinearLayout(this);
         Button retry = new Button(this); retry.setText("Conectar");
-        retry.setOnClickListener(v -> { stopStream(); connect(); });
+        retry.setOnClickListener(v -> { stopStream(); startStream(); });
         Button close = new Button(this); close.setText("Fechar"); close.setOnClickListener(v -> finish());
-        actions.addView(retry); actions.addView(close);
+        Button gallery = new Button(this); gallery.setText("Gravações");
+        gallery.setOnClickListener(v -> startActivity(new Intent(this, VideoGalleryActivity.class)));
+        Button settings = new Button(this); settings.setText("Config");
+        settings.setOnClickListener(v -> startActivity(new Intent(this, VideoSettingsActivity.class)));
+        actions.addView(retry); actions.addView(gallery); actions.addView(settings); actions.addView(close);
         layout.addView(actions,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.RIGHT));
         setContentView(layout);
-        args = new Shizuku.UserServiceArgs(new ComponentName(this,CameraService.class))
-                .daemon(false).processNameSuffix("camera").version(2);
-        Shizuku.addBinderReceivedListenerSticky(binderReceived);
-        Shizuku.addBinderDeadListener(binderDead);
-        Shizuku.addRequestPermissionResultListener(permissionResult);
+        Intent serviceIntent = new Intent(this, TripVideoService.class);
+        if (android.os.Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent); else startService(serviceIntent);
     }
 
     @Override protected void onResume() {
-        super.onResume(); active=true; preview.onResume(); connect(); handler.post(monitor);
+        super.onResume(); active=true; preview.onResume();
+        bound = bindService(new Intent(this, TripVideoService.class), connection, Context.BIND_AUTO_CREATE);
+        status.setText("Conectando à câmera…"); handler.post(monitor);
     }
 
-    private void connect() {
-        if (!active || binding || permissionPending) return;
-        try {
-            if (!Shizuku.pingBinder()) { status.setText("Inicie o Shizuku e toque em Conectar."); return; }
-            if (Shizuku.checkSelfPermission()!=PackageManager.PERMISSION_GRANTED) {
-                permissionPending=true; status.setText("Aguardando autorização do Shizuku…");
-                Shizuku.requestPermission(1); return;
-            }
-            if (Shizuku.getUid()!=0) { status.setText("Nesta central, inicie o Shizuku com acesso root."); return; }
-            status.setText("Conectando à câmera…");
-            binding=true; Shizuku.bindUserService(args,connection);
-        } catch (Exception e) { binding=false; status.setText("Não foi possível conectar: "+e.getMessage()); }
-    }
-
-    private void readFrames(ICameraStream remote, int run) {
-        try {
-            File config = new File(getFilesDir(),"input4.xml");
-            Files.write(config.toPath(), ("<qcarcam_inputs><input_device><properties input_id=\"4\"/>"
-                + "<display_setting display_id=\"0\"/><output_setting nbufs=\"5\"/>"
-                + "</input_device></qcarcam_inputs>").getBytes(StandardCharsets.UTF_8));
-            ParcelFileDescriptor fd = remote.start(getApplicationInfo().nativeLibraryDir+"/libcamera_stream.so",config.getPath());
-            try (DataInputStream stream = new DataInputStream(new ParcelFileDescriptor.AutoCloseInputStream(fd))) {
-                if (run!=generation) { remote.stop(); return; }
-                input=stream;
-                byte[] frame=new byte[CameraPreview.FRAME_SIZE];
-                long count=0;
-                while (run==generation) {
-                    stream.readFully(frame);
-                    if (run!=generation) break;
-                    preview.publish(frame); lastFrame=SystemClock.elapsedRealtime();
-                    if (++count==1 || count%150==0) {
-                        Log.i("HavalCamera","Live frames="+count);
-                        handler.post(() -> { if (run==generation) status.setText("Câmera ao vivo"); });
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e("HavalCamera","Stream ended",e);
-            handler.post(() -> { if (run==generation) {
-                preview.clear(); status.setText("Sem imagem: "+(e.getMessage()==null ? "captura encerrada" : e.getMessage()));
-            }});
-        }
+    private void startStream() {
+        if (!active) return;
+        if (service == null || previewSubscription != null) return;
+        previewSubscription = service.subscribePreview(frame -> {
+            preview.publish(frame);
+            lastFrame = SystemClock.elapsedRealtime();
+            runOnUiThread(() -> status.setText("Câmera ao vivo"));
+        });
     }
 
     private void stopStream() {
-        generation++; lastFrame=0;
-        try { if (service!=null) service.stop(); } catch (Exception e) { Log.w("HavalCamera","Stop",e); }
-        try { if (input!=null) input.close(); } catch (Exception ignored) { }
-        input=null; service=null;
-        if (binding && Shizuku.pingBinder()) {
-            try { Shizuku.unbindUserService(args,connection,true); } catch (Exception e) { Log.w("HavalCamera","Unbind",e); }
-        }
-        binding=false; preview.clear();
+        lastFrame=0;
+        if (previewSubscription != null) previewSubscription.close();
+        previewSubscription = null;
+        preview.clear();
     }
 
     @Override protected void onPause() {
-        active=false; handler.removeCallbacks(monitor); stopStream(); preview.onPause(); super.onPause();
+        active=false; handler.removeCallbacks(monitor); stopStream();
+        if (bound) unbindService(connection); bound=false; service=null;
+        preview.onPause(); super.onPause();
     }
 
     @Override protected void onDestroy() {
-        Shizuku.removeBinderReceivedListener(binderReceived); Shizuku.removeBinderDeadListener(binderDead);
-        Shizuku.removeRequestPermissionResultListener(permissionResult); super.onDestroy();
+        super.onDestroy();
     }
 }

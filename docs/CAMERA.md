@@ -55,7 +55,7 @@ As variáveis acima representam caminhos que o serviço já validou. Mantenha as
 
 `-noDisplay` evita uma janela criada pelo cliente. `-dumpFrame=2` solicita um dump a cada dois quadros, não uma captura de apenas dois quadros. Sem nossa biblioteca, esse recurso grava arquivos grandes em `/data/vendor/camera`; não o deixe executando como uma alternativa ao pipe.
 
-A biblioteca intercepta apenas `fopen` com o prefixo `/data/vendor/camera/frame_0_`, sufixo numérico `.raw` e modo `w+`. Ela devolve um `FILE*` criado a partir de uma cópia do descritor 3. O `fwrite` do cliente escreve no pipe e o `fclose` fecha apenas essa cópia. As outras aberturas seguem para o `fopen` original via `RTLD_NEXT`.
+A biblioteca intercepta apenas `fopen` com o prefixo `/data/vendor/camera/frame_0_`, sufixo numérico `.raw` e um modo de escrita compatível (`w`, `wb`, `w+`, `wb+` ou `w+b`). O firmware do carro em 3 de novembro de 2026 recusou todos os dumps quando o hook aceitava somente `w+`; por isso a validação continua limitada aos modos de criação para escrita, mas aceita a variante binária usada pelo cliente. Ela devolve um `FILE*` criado a partir de uma cópia do descritor 3. O `fwrite` do cliente escreve no pipe e o `fclose` fecha apenas essa cópia. As outras aberturas seguem para o `fopen` original via `RTLD_NEXT`.
 
 O construtor nativo verifica que o descritor 3 é um pipe e configura `PR_SET_PDEATHSIG` com `SIGTERM`. A Activity recebe o fluxo por `ParcelFileDescriptor`, usa `readFully` para formar quadros completos e entrega cada um ao renderer. Logs viajam separados, por stderr, para não deslocar a fronteira dos quadros.
 

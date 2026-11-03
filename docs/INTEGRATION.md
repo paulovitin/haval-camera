@@ -109,3 +109,9 @@ Você pode usar `CameraPreview.publish()` como o exemplo ou encaminhar o buffer 
 Preserve a parada no ciclo de vida, o fechamento do descritor e `unbindUserService(..., true)`. O método `destroy() = 16777114` do AIDL faz parte do encerramento esperado pelo Shizuku. Mantenha erros visíveis e apague a imagem quando o stream parar.
 
 Finalize a integração verificando no hardware a imagem física, quadros novos, ausência de arquivos raw, fechamento do filho e reabertura. A disputa entre dois apps usando a câmera ao mesmo tempo ainda não foi validada.
+
+## API local do EcoTrip
+
+O APK independente expõe `content://br.com.redesurftank.havalcamera.video` para o EcoTrip. O provider não usa uma permissão Android `signature`, porque os dois APKs possuem certificados distintos. Cada operação verifica o UID Binder, o pacote exato `br.com.redesurftank.ecotrip` e o SHA-256 do certificado `c380e4bc34c564238d114d826d08fc26d3fa6e651103a7771073de6576921b03` antes de ler extras ou arquivos.
+
+Comandos usam `ContentResolver.call(uri, "command", action, extras)`. O provider valida a ação, inicia internamente o `TripVideoService` ainda protegido por permissão `signature` e devolve o resultado correlacionado por `requestId` e revisão. Catálogo, segmentos e configurações passam pela mesma verificação de chamador. Trocar pacote ou certificado do EcoTrip exige atualizar essa lista fixa e repetir os testes de acesso autorizado e rejeitado.

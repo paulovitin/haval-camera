@@ -18,7 +18,13 @@ Keep the image blank on stream errors instead of presenting an old frame as live
 
 ## Build and verify
 
-Run `bash build.sh` using the SDK versions in the script. Completion requires successful Java/AIDL/native compilation, APK signature verification, and ZIP alignment. For CMake changes, also build `app/src/main/cpp/CMakeLists.txt` with the Android NDK for `arm64-v8a` and API 28.
+Never run Android, Gradle, Kotlin, Xcode, SDK tools, Android javac, CMake/NDK, `./gradlew`, or `build.sh` on the coordinator. Use an audited immutable Git commit on the authorized Mac Mini; never send uncommitted sources or secrets, and never fall back locally. Only shell syntax, XML/TOML/text inspection, archive/checksum inspection, and Git diff checks are allowed on the coordinator for this migration.
+
+On the authorized Mac Mini, use JDK 17 to run Gradle 8.14.3 / AGP 8.12.1, Java source/target 11, SDK 36, build tools 36.0.0, min/target 28, NDK 27.0.12077973, CMake 3.22.1, and arm64-v8a only. Run `./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug`, then `bash build.sh`. Completion requires real Java/AIDL/native compilation, a passing smoke test, signature verification, ZIP alignment, and ZIP integrity. The historical GitHub Actions success proves only the old manual baseline.
+
+The official checksum-verified Gradle wrapper was regenerated on the Mini, and `gradle/verification-metadata.xml` covers the test, debug, and release graphs. See README.md for the regeneration commands required after dependency or wrapper changes. Normal builds and CI must use strict verification; never use lenient/off mode, trusted-artifact wildcards, ignored checksums, or CI checksum generation. Audit generated checksums, preserve the original four Shizuku AAR hashes, commit the completed metadata, and verify again without metadata generation.
+
+`build.sh` assembles the release variant and preserves `build/haval-camera.apk` plus `apksigner verify`, approved-certificate SHA-256 verification, `zipalign -c 4`, and `unzip -tq`. Debug builds keep Gradle debug signing. Release builds require all four existing `CAMERA_*` variables and the approved EcoTrip certificate; keys and passwords never enter source control. The scoped `android-camera-verify` queue job maps signing material from the Mini. GitHub-hosted CI performs source/static checks only and never publishes an APK. Preserve AGPL-3.0, the Shizuku MIT notice, and packaged third-party notices.
 
 Before writing mobile UI tests, explore the real interactions with ARTEMIS as required by the task environment. Check `adb devices -l`, target the user's explicit serial, and ask when device choice is ambiguous. An emulator build or screenshot does not validate this hardware camera path. If ARTEMIS or the target device is unavailable, report that limit and do not invent device-test results.
 

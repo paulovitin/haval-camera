@@ -13,6 +13,7 @@ final class CameraPreview extends GLSurfaceView implements GLSurfaceView.Rendere
     static final int WIDTH = 1760, HEIGHT = 720, FRAME_SIZE = WIDTH * HEIGHT * 3;
     private final ByteBuffer pixels = ByteBuffer.allocateDirect(FRAME_SIZE);
     private final FloatBuffer quad = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+    private final TelemetryOverlayRenderer overlay = new TelemetryOverlayRenderer();
     private boolean available, pending;
     private int program, texture, position, uv, screenWidth, screenHeight;
 
@@ -32,6 +33,11 @@ final class CameraPreview extends GLSurfaceView implements GLSurfaceView.Rendere
     }
 
     synchronized void clear() { available = false; requestRender(); }
+
+    void setOverlaySnapshot(TelemetryOverlayModel.Snapshot snapshot) {
+        overlay.setSnapshot(snapshot);
+        requestRender();
+    }
 
     private int shader(int kind, String source) {
         int s = GLES20.glCreateShader(kind);
@@ -59,6 +65,7 @@ final class CameraPreview extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D,GLES20.GL_TEXTURE_WRAP_T,GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT,1);
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D,0,GLES20.GL_RGB,WIDTH,HEIGHT,0,GLES20.GL_RGB,GLES20.GL_UNSIGNED_BYTE,null);
+        overlay.onSurfaceCreated();
         synchronized (this) { pending = available; }
     }
 
@@ -80,5 +87,7 @@ final class CameraPreview extends GLSurfaceView implements GLSurfaceView.Rendere
         quad.position(2); GLES20.glVertexAttribPointer(uv,2,GLES20.GL_FLOAT,false,16,quad);
         GLES20.glEnableVertexAttribArray(position); GLES20.glEnableVertexAttribArray(uv);
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP,0,4);
+        GLES20.glViewport(0,0,screenWidth,screenHeight);
+        overlay.draw(screenWidth,screenHeight);
     }
 }

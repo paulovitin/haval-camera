@@ -20,25 +20,48 @@ Você precisa de uma central Android ARM64 com o cliente `/vendor/bin/qcarcam_te
 2. Inicie o Shizuku com root, abra **Câmera Haval** e conceda a autorização solicitada.
 3. Mantenha o app aberto para acompanhar o vídeo. **Conectar** tenta reiniciar a captura; **Fechar** encerra a Activity.
 
-O código pede o encerramento da captura quando a Activity sai do primeiro plano. Não há inicialização automática no boot nem gravação de vídeo. Telnet, ADB e um computador foram ferramentas de investigação; o APK instalado não usa esses canais para transportar os quadros.
+O código pede o encerramento da visualização quando a Activity sai do primeiro plano. Não há inicialização automática no boot. Em novas instalações, a gravação reserva 1 GiB livre; **Configurações** permite escolher 1, 5, 10 ou 20 GiB e mantém escolhas explícitas já salvas. Telnet, ADB e um computador foram ferramentas de investigação; o APK instalado não usa esses canais para transportar os quadros.
+
+Na galeria, **Compartilhar na rede local** usa somente o primeiro IPv4 privado da rede Android ativa com transporte Wi-Fi, consultada por `ConnectivityManager` e `LinkProperties`. Não depende do nome da interface e não procura endereços em outras redes. O status mostra Wi-Fi, endereço, porta, código de pareamento e tempo restante. Sem Wi-Fi ativo ou IPv4 privado, mostra o motivo e não abre o portal. As permissões normais `ACCESS_NETWORK_STATE` e `INTERNET` permitem consultar a rede e abrir o socket local; o servidor continua temporário, somente leitura, pareado e ligado exatamente ao endereço selecionado. A validação física com central e telefone na mesma rede permanece pendente em [docs/VALIDATION.md](docs/VALIDATION.md).
+
+**Voltar** aparece na câmera, galeria, reprodução e configurações. Ele encerra somente a tela atual; a gravação automática ativa continua no serviço. O botão físico Voltar mantém seu comportamento. A posição e o toque do botão ainda precisam de validação na central Android 9.
 
 ## Compilar
 
-Use JDK 17, Bash, `curl`, `zip`, `unzip` e o Android SDK no macOS ou Linux x86_64. No Windows, use WSL. Instale os componentes com o SDK Manager:
+**Não execute builds Android, Gradle, Kotlin ou Xcode no coordenador.** Use um commit Git imutável e auditado no Mac Mini autorizado. Não envie arquivos não commitados, credenciais, keystores, caches ou logs; não use build local como fallback. O CI existente comprova somente o baseline do build manual anterior, não esta migração Gradle nem a câmera física.
+
+O wrapper foi regenerado no Mac Mini autorizado com Gradle 8.14.3; o JAR manteve o SHA-256 oficial `7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172`. `gradle/verification-metadata.xml` cobre o grafo resolvido por testes, debug e release, incluindo os quatro AARs Shizuku já auditados. A verificação final executou teste unitário, debug, release, assinatura, alinhamento e integridade do ZIP no Mini. Não desative a verificação e não gere checksums automaticamente no CI.
+
+No Mac Mini, use JDK 17 para executar Gradle 8.14.3/AGP 8.12.1; o código Java é compilado para Java 11. Instale os componentes fixados:
 
 ```sh
-sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973'
+sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.0.12077973' 'cmake;3.22.1'
 export ANDROID_HOME=/caminho/para/android-sdk
+```
+
+O projeto também aceita `ANDROID_SDK_ROOT`; no macOS, o script usa `$HOME/Library/Android/sdk` como padrão. Compile SDK 36, min/target SDK 28 e ABI `arm64-v8a` permanecem fixos. Como o APK é específico para instalação direta na central e não para o Google Play, somente o lint `ExpiredTargetSdkVersion` fica desativado; os demais continuam ativos. Java, AIDL e `app/src/main/cpp/CMakeLists.txt` mantêm os diretórios existentes; JNI usa extração legada para o `LD_PRELOAD`.
+
+Ao alterar wrapper ou dependências, regenere os metadados **apenas no Mac Mini autorizado** com o Gradle 8.14.3 confiável. Os comandos de geração não são evidência de um build verificado:
+
+```sh
+./gradlew --no-daemon --write-verification-metadata sha256 wrapper --gradle-version 8.14.3 --distribution-type bin --gradle-distribution-sha256-sum bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531
+./gradlew --no-daemon --write-verification-metadata sha256 :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+```
+
+Revise o diff do wrapper e cada novo checksum contra a origem oficial; não aceite alterações nos quatro checksums Shizuku existentes. Commit os metadados completos e o wrapper antes da verificação final em um novo snapshot auditado. O catálogo de versões fica em `gradle/libs.versions.toml`. A verificação inclui POMs/metadados e artefatos, sem exceções globais.
+
+Depois de qualquer mudança, execute no Mac Mini:
+
+```sh
+./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
 bash build.sh
 ```
 
-O script também aceita `ANDROID_SDK_ROOT`. No macOS, o caminho padrão é `$HOME/Library/Android/sdk`. O resultado fica em `build/haval-camera.apk`.
+O teste `BuildSmokeTest.existingFrameSizeIsStable()` fixa 1760 × 720 e 3.801.600 bytes por quadro. `build.sh` monta `:app:assembleRelease` com verificação estrita, copia o APK para `build/haval-camera.apk` e executa `apksigner verify`, confere o SHA-256 do certificado EcoTrip aprovado, executa `zipalign -c 4` e `unzip -tq`. Gradle incorpora AGPL-3.0, MIT do Shizuku e avisos Apache-2.0 das novas dependências nos assets.
 
-O build baixa os quatro módulos Shizuku API 13.1.5 do Maven Central e verifica seus SHA-256 em `dependencies.sha256`. Compila Java/AIDL e a biblioteca ARM64, empacota as licenças e verifica a assinatura e o alinhamento do APK. O projeto usa diretamente as ferramentas do SDK; não precisa de Gradle para gerar este exemplo.
+Builds debug usam somente a assinatura debug do Gradle. `build.sh` exige **todas** as variáveis `CAMERA_KEYSTORE`, `CAMERA_KEY_ALIAS`, `CAMERA_STORE_PASS` e `CAMERA_KEY_PASS`, e aceita o APK somente quando o certificado do assinante tem SHA-256 `5efec0f94d84d90e769635a81d51e2f25953d5d5b3cea950a115705d3b5e83e0`. Configuração parcial, keystore inexistente ou outro certificado causa erro sem imprimir senhas. Nunca publique o keystore. A fila autorizada injeta esse material somente no caminho restrito `android-camera-verify`, sem incluí-lo no arquivo-fonte ou nos artefatos.
 
-Por padrão, o script gera uma chave de desenvolvimento em `build/debug.keystore`. Para usar uma chave existente, defina `CAMERA_KEYSTORE`, `CAMERA_KEY_ALIAS`, `CAMERA_STORE_PASS` e `CAMERA_KEY_PASS` no ambiente. Guarde a mesma chave para assinar atualizações; um build local ou do CI pode ter assinatura diferente da versão instalada. Nunca publique o keystore.
-
-O workflow do GitHub também gera um APK como artifact. Ele verifica o build; não testa as câmeras do carro.
+O workflow hospedado mantém a action de checkout fixada por SHA e executa somente verificações estáticas de shell, TOML e XML. Ele não instala SDK, não executa Gradle ou `build.sh` e não publica APK. Testes, builds e artefatos Android existem somente na fila auditada do Mac Mini. Esses resultados não validam a câmera do carro nem substituem os gates físicos pendentes.
 
 ## Usar em outros aplicativos
 
@@ -51,3 +74,21 @@ O app não publica um serviço de câmera aberto para outros pacotes, nem um end
 O projeto mantém a [AGPL-3.0](LICENSE) escolhida para este repositório. Considere essa licença ao incorporar ou distribuir o código em outro aplicativo. A [Shizuku API](https://github.com/RikkaApps/Shizuku-API) usa a [licença MIT](LICENSES/Shizuku-API.txt).
 
 O APK não inclui os binários Qualcomm nem bibliotecas extraídas da central. Ele usa os componentes que já existem no dispositivo. Este é um projeto independente, sem vínculo com GWM ou Qualcomm.
+
+## Atualização confirmada pelo GitHub
+
+Em **Configurações → Verificar atualização**, o app consulta a release estável mais recente de `rafaelcs28/haval-camera`. **Receber versões de teste** é uma preferência local, desativada por padrão, que permite a primeira release não draft da lista mais recente, incluindo prereleases. A comparação usa somente `versionCode`; versões iguais ou anteriores não são oferecidas.
+
+A release precisa conter exatamente um asset `update-manifest.json` com `schemaVersion: 1`, `versionCode` inteiro positivo até 2147483647, `versionName`, `apk` (nome exato), `size` em bytes (até 1 GiB) e `sha256` em hexadecimal minúsculo. Campos ausentes, duplicados, extras, tipos incorretos, schema desconhecido ou nomes de assets duplicados bloqueiam a oferta. O APK vem do mesmo conjunto de assets, por nome exato; não há escolha do primeiro arquivo `.apk`. Não há token GitHub nem dependência de EcoTrip/Impulse.
+
+O usuário confirma **Baixar**, vê o resultado da verificação e confirma **Instalar**. O app confere tamanho, SHA-256, pacote, versão e o único certificado atual do APK, fixado em `5efec0f94d84d90e769635a81d51e2f25953d5d5b3cea950a115705d3b5e83e0`. APK inválido ou parcial é apagado. O provider de arquivos usa somente `cache/updates/`, não é exportado, só abre em leitura e concede acesso ao instalador pela URI específica. Não há instalação silenciosa. Ao voltar da permissão Android para instalar apps desconhecidos, verifique e confirme novamente; não há instalação automática no retorno.
+
+A consulta de releases funciona durante a gravação. Depois de confirmar **Baixar** ou **Instalar**, se captura/gravação estiver ativa, o app oferece **Encerrar visualização**: encerra apenas os visualizadores locais/remotos e aguarda o serviço ficar ocioso, sem interromper gravações. A tela mostra a espera e **Cancelar espera**, observa o serviço a cada 500 ms e retoma a ação confirmada automaticamente quando ele fica ocioso. A espera não tem prazo que force o fim da gravação; os limites normais do serviço continuam válidos. O APK verificado é preservado durante a espera e verificado novamente antes de instalar. Se a captura reiniciar durante essa verificação, o fluxo oferece encerrar a visualização e aguarda novamente. Desconexão não é tratada como ociosidade. O estado é consultado novamente imediatamente antes de abrir o instalador. Cancelar ou sair de Configurações encerra a observação e descarta ações pendentes. A instalação real, as telas de permissão e o provider ainda precisam de validação no Android 9 físico; os testes JVM não substituem esse gate.
+
+No Mac Mini autorizado, `build.sh` agora também executa:
+
+```sh
+bash scripts/write-update-manifest.sh build/haval-camera.apk build/update-manifest.json "$ANDROID_SDK_ROOT/build-tools/36.0.0"
+```
+
+O script verifica assinatura fixada, alinhamento e ZIP; lê pacote/versão do APK com `aapt`, calcula tamanho/hash e grava JSON atomicamente. Não recebe versão/hash manualmente e não publica nada. Ao publicar uma release autorizada, anexe **o mesmo APK verificado** e seu `update-manifest.json`. O job existente pode devolver apenas APK/log; o manifesto fica em `source/build/update-manifest.json` no diretório do job. Não execute esse script nem ferramentas SDK no coordenador. `app/build.gradle.kts` e dependências permanecem iguais: a versão instalada vem de `PackageManager`, dispensando `BuildConfig` e um novo digest de controles de build.

@@ -15,6 +15,12 @@ __attribute__((constructor)) static void init_stream(void) {
     if (getppid() == 1) { fprintf(stderr, "Camera stream: parent already exited\n"); _exit(75); }
 }
 
+static int is_dump_write_mode(const char *mode) {
+    return mode && (!strcmp(mode, "w") || !strcmp(mode, "wb")
+            || !strcmp(mode, "w+") || !strcmp(mode, "wb+")
+            || !strcmp(mode, "w+b"));
+}
+
 FILE *fopen(const char *path, const char *mode) {
     static FILE *(*original)(const char *, const char *);
     const char prefix[] = "/data/vendor/camera/frame_0_";
@@ -22,7 +28,7 @@ FILE *fopen(const char *path, const char *mode) {
         const char *p = path + sizeof(prefix)-1;
         if (*p < '0' || *p > '9') { errno = EINVAL; return NULL; }
         while (*p >= '0' && *p <= '9') p++;
-        if (strcmp(p, ".raw") || strcmp(mode, "w+")) { errno = EINVAL; return NULL; }
+        if (strcmp(p, ".raw") || !is_dump_write_mode(mode)) { errno = EINVAL; return NULL; }
         int fd = dup(3);
         if (fd < 0) return NULL;
         FILE *stream = fdopen(fd, "w");
