@@ -80,33 +80,76 @@ public final class TransferChunkCodecTest {
     }
 
     @Test
-    public void negativeOffsetsAreRejectedByEveryOffsetEncoder() {
-        for (long offset : new long[] {-1, Long.MIN_VALUE}) {
-            assertThrows(IllegalArgumentException.class,
-                    () -> TransferChunkCodec.encodeData(1, offset, abc()));
-            assertThrows(IllegalArgumentException.class,
-                    () -> TransferChunkCodec.encodeEof(1, offset, bytes(SHA_ABC)));
-            assertThrows(IllegalArgumentException.class,
-                    () -> TransferChunkCodec.encodeAck(1, offset));
+    public void ackHighBitOffsetMatchesUnsignedFixture() {
+        String fixture = "485654310103000000000001800000000000000000000000" + ZERO_SHA;
+        assertEquals(fixture, hex(TransferChunkCodec.encodeAck(1, Long.MIN_VALUE)));
+        assertMessage(fixture, TransferChunkCodec.Type.ACK, 1, Long.MIN_VALUE,
+                new byte[0], ZERO_SHA);
+    }
+
+    @Test
+    public void ackMaximumUnsignedOffsetMatchesFixture() {
+        String fixture = "485654310103000000000001ffffffffffffffff00000000" + ZERO_SHA;
+        assertEquals(fixture, hex(TransferChunkCodec.encodeAck(1, -1L)));
+        assertMessage(fixture, TransferChunkCodec.Type.ACK, 1, -1L,
+                new byte[0], ZERO_SHA);
+    }
+
+    @Test
+    public void controlDecodersPreserveUnsignedOffsetBitsIndependentlyOfEncoders() {
+        for (String fixture : new String[] {EOF, ACK}) {
+            for (long offset : new long[] {Long.MIN_VALUE, -1L}) {
+                ByteBuffer encoded = frame(fixture);
+                encoded.putLong(12, offset);
+                assertEquals(offset, TransferChunkCodec.decode(encoded).offset);
+            }
         }
     }
 
     @Test
-    public void highBitUnsignedOffsetsAreRejectedBeforeArithmetic() {
-        for (String fixture : new String[] {DATA, EOF, ACK, ERROR}) {
-            ByteBuffer encoded = frame(fixture);
-            encoded.putLong(12, Long.MIN_VALUE);
+    public void eofEncoderPreservesHighBitAndMaximumUnsignedTotalBytes() {
+        for (long totalBytes : new long[] {Long.MIN_VALUE, -1L}) {
+            ByteBuffer encoded = TransferChunkCodec.encodeEof(1, totalBytes, bytes(SHA_ABC));
+            assertEquals(totalBytes, encoded.getLong(12));
+            assertEquals(totalBytes, TransferChunkCodec.decode(encoded).offset);
+        }
+    }
+
+    @Test
+    public void dataCanCrossSignedBoundaryAndEndAtMaximumUnsignedOffset() {
+        for (long offset : new long[] {Long.MAX_VALUE - 2, Long.MAX_VALUE, Long.MIN_VALUE, -4L}) {
+            ByteBuffer encoded = TransferChunkCodec.encodeData(1, offset, abc());
+            assertEquals(offset, encoded.getLong(12));
+            assertEquals(offset, TransferChunkCodec.decode(encoded).offset);
+            ByteBuffer independent = frame(DATA);
+            independent.putLong(12, offset);
+            assertEquals(offset, TransferChunkCodec.decode(independent).offset);
+        }
+    }
+
+    @Test
+    public void dataRejectsOnlyTrueUnsignedEndOffsetOverflow() {
+        for (long offset : new long[] {-3L, -2L, -1L}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> TransferChunkCodec.encodeData(1, offset, abc()));
+            ByteBuffer encoded = frame(DATA);
+            encoded.putLong(12, offset);
             reject(encoded);
         }
     }
 
     @Test
-    public void dataEndOffsetOverflowIsRejectedOnEncodeAndDecode() {
+    public void maximumDataChunkUsesUnsignedOverflowBoundary() {
+        byte[] payload = new byte[262144];
+        ByteBuffer encoded = TransferChunkCodec.encodeData(1, -262145L, payload);
+        assertEquals(-262145L, TransferChunkCodec.decode(encoded).offset);
+        ByteBuffer independent = rawPayload(1, payload);
+        independent.putLong(12, -262145L);
+        assertEquals(-262145L, TransferChunkCodec.decode(independent).offset);
         assertThrows(IllegalArgumentException.class,
-                () -> TransferChunkCodec.encodeData(1, Long.MAX_VALUE - 2, abc()));
-        ByteBuffer encoded = frame(DATA);
-        encoded.putLong(12, Long.MAX_VALUE - 2);
-        reject(encoded);
+                () -> TransferChunkCodec.encodeData(1, -262144L, payload));
+        independent.putLong(12, -262144L);
+        reject(independent);
     }
 
     @Test
@@ -168,9 +211,11 @@ public final class TransferChunkCodecTest {
 
     @Test
     public void errorOffsetMustBeZero() {
-        ByteBuffer encoded = frame(ERROR);
-        encoded.putLong(12, 1);
-        reject(encoded);
+        for (long offset : new long[] {1L, Long.MIN_VALUE, -1L}) {
+            ByteBuffer encoded = frame(ERROR);
+            encoded.putLong(12, offset);
+            reject(encoded);
+        }
     }
 
     @Test
