@@ -379,17 +379,8 @@ public final class TripVideoService extends Service {
 
     private void enforceStorageReserve() throws IOException {
         VideoSettings.Snapshot value = settings.reload();
-        List<RetentionPlanner.Entry> entries = new ArrayList<>();
-        for (VideoCatalog.Trip trip : catalog.localSnapshot()) {
-            List<Long> sizes = new ArrayList<>();
-            for (VideoCatalog.Segment segment : trip.segments) sizes.add(segment.byteSize);
-            entries.add(new RetentionPlanner.Entry(trip.tripId, trip.startMs, sizes, trip.completed));
-        }
-        RetentionPlanner.Plan plan = RetentionPlanner.selectDeletions(entries,
-                getFilesDir().getUsableSpace(), value.reserveBytes, value.automaticDeletion,
-                activeTripId == null ? null : Long.parseLong(activeTripId), catalog.leasedTripIds());
-        for (Long tripId : plan.tripIds) catalog.discardTrip(Long.toString(tripId));
-        if (!plan.recordingMayContinue) throw new IOException("Reserva de armazenamento indisponível");
+        catalog.enforceStorageReserve(() -> getFilesDir().getUsableSpace(), value.reserveBytes,
+                value.automaticDeletion, activeTripId == null ? null : Long.parseLong(activeTripId));
     }
 
     private static VideoContract.Command command(String action) {

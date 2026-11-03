@@ -1,7 +1,9 @@
 package br.com.redesurftank.havalcamera;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.EOFException;
+import java.nio.channels.FileChannel;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -110,7 +112,7 @@ public final class RecordingTransfer implements AutoCloseable {
                 if (Long.compareUnsigned(offset, metadata.byteSize) > 0
                         || (completed.contains(id) && offset != metadata.byteSize))
                     throw new IllegalArgumentException("Invalid file offset");
-                try (RandomAccessFile input = catalog.openTransferSegment(acquired, id)) { /* preflight every file */ }
+                try (FileChannel input = catalog.openTransferSegment(acquired, id)) { /* preflight every file */ }
                 selected.put(id, new Progress(id, metadata, offset, completed.contains(id)));
             }
         } catch (IOException | RuntimeException failure) {
@@ -235,31 +237,47 @@ public final class RecordingTransfer implements AutoCloseable {
         try {
             ByteBuffer frame;
             boolean eof = offset == progress.metadata.byteSize;
-            // Payload reads and hashing stay on this worker, outside the service/control lock.
-            try (RandomAccessFile input = catalog.openTransferSegment(reading.lease, progress.id)) {
-                if (!progress.verified) {
-                    MessageDigest whole = sha256();
-                    while (true) {
-                        synchronized (this) {
-                            if (!current(attempt) || paused || live) return;
-                            if (clock.getAsLong() >= expiresAt) { end(4000); return; }
-                        }
-                        int count = input.read(buffer);
-                        if (count == -1) break;
-                        whole.update(buffer, 0, count);
-                    }
-                    if (!MessageDigest.isEqual(whole.digest(), progress.digest)) throw new IOException("Segment integrity failure");
-                    progress.verified = true;
-                }
-                input.seek(offset);
-                if (eof) frame = TransferChunkCodec.encodeEof(progress.metadata.segmentId, offset, progress.digest);
-                else {
-                    int count = (int) Math.min(buffer.length, progress.metadata.byteSize - offset);
-                    input.readFully(buffer, 0, count);
-                    frame = TransferChunkCodec.encodeData(progress.metadata.segmentId, offset,
-                            count == buffer.length ? buffer : Arrays.copyOf(buffer, count));
-                }
+            // Verification and every later read use the same open identity, including pause/resume.
+            BasicFileAttributes observed = catalog.transferSegmentAttributes(reading.lease, progress.id);
+            if (reading.input == null || reading.progress != progress) {
+                reading.closeInput();
+                reading.input = catalog.openTransferSegment(reading.lease, progress.id);
+                reading.progress = progress;
+                reading.attributes = observed;
+                progress.verified = false;
             }
+            reading.requireUnchanged(observed);
+            FileChannel input = reading.input;
+            if (input.size() != progress.metadata.byteSize) throw new IOException("Segment size changed");
+            if (!progress.verified) {
+                input.position(0);
+                MessageDigest whole = sha256();
+                ByteBuffer block = ByteBuffer.wrap(buffer);
+                while (true) {
+                    synchronized (this) {
+                        if (!current(attempt) || paused || live) return;
+                        if (clock.getAsLong() >= expiresAt) { end(4000); return; }
+                    }
+                    block.clear();
+                    int count = input.read(block);
+                    if (count == -1) break;
+                    whole.update(buffer, 0, count);
+                }
+                if (!MessageDigest.isEqual(whole.digest(), progress.digest)) throw new IOException("Segment integrity failure");
+                progress.verified = true;
+            }
+            input.position(offset);
+            if (eof) frame = TransferChunkCodec.encodeEof(progress.metadata.segmentId, offset, progress.digest);
+            else {
+                int count = (int) Math.min(buffer.length, progress.metadata.byteSize - offset);
+                ByteBuffer payload = ByteBuffer.wrap(buffer, 0, count);
+                while (payload.hasRemaining()) {
+                    if (input.read(payload) == -1) throw new EOFException("Segment shortened");
+                }
+                frame = TransferChunkCodec.encodeData(progress.metadata.segmentId, offset,
+                        count == buffer.length ? buffer : Arrays.copyOf(buffer, count));
+            }
+            reading.requireUnchanged(catalog.transferSegmentAttributes(reading.lease, progress.id));
             synchronized (this) {
                 if (!current(attempt) || paused || live || pending != null || progress.offset != offset) return;
                 if (clock.getAsLong() >= expiresAt) { end(4000); return; }
@@ -294,7 +312,10 @@ public final class RecordingTransfer implements AutoCloseable {
 
     private void release(Ownership ended) {
         if (ended.released) return;
-        ended.released = true; ended.lease.close();
+        ended.released = true;
+        try { ended.closeInput(); }
+        catch (IOException ignored) { /* A close failure must not retain the catalog lease. */ }
+        ended.lease.close();
         onEnded.run();
     }
 
@@ -303,7 +324,19 @@ public final class RecordingTransfer implements AutoCloseable {
         boolean inUse;
         boolean ended;
         boolean released;
+        FileChannel input;
+        Progress progress;
+        BasicFileAttributes attributes;
         Ownership(VideoCatalog.ReadLease lease) { this.lease = lease; }
+        void requireUnchanged(BasicFileAttributes observed) throws IOException {
+            if (!Objects.equals(attributes.fileKey(), observed.fileKey())
+                    || !attributes.lastModifiedTime().equals(observed.lastModifiedTime())
+                    || attributes.size() != observed.size()) throw new IOException("Completed segment identity changed");
+        }
+        void closeInput() throws IOException {
+            FileChannel old = input; input = null; progress = null; attributes = null;
+            if (old != null) old.close();
+        }
     }
 
     @Override public synchronized void close() {

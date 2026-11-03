@@ -3,7 +3,10 @@ package br.com.redesurftank.havalcamera;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.LinkOption;
+import java.util.function.LongSupplier;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -284,22 +287,60 @@ public final class VideoCatalog {
         return new ReadLease(this, id);
     }
 
-    /** Opens only completed, exact catalog content while this catalog owns the lease. */
-    public synchronized RandomAccessFile openTransferSegment(ReadLease lease, String segmentId)
+    /** The final component is opened with O_NOFOLLOW, not a check-then-follow open. */
+    public synchronized FileChannel openTransferSegment(ReadLease lease, String segmentId)
             throws IOException {
+        File expected = checkedTransferSegment(lease, segmentId);
+        FileChannel input = FileChannel.open(expected.toPath(), StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+        try {
+            checkedTransferSegment(lease, segmentId);
+            if (input.size() != requireTrip(lease.tripId).segments.get(Integer.parseInt(segmentId) - 1).byteSize)
+                throw new IOException("Completed segment size mismatch");
+            return input;
+        } catch (IOException | RuntimeException failure) {
+            input.close(); throw failure;
+        }
+    }
+
+    synchronized BasicFileAttributes transferSegmentAttributes(ReadLease lease, String segmentId) throws IOException {
+        File file = checkedTransferSegment(lease, segmentId);
+        BasicFileAttributes attributes = Files.readAttributes(file.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (!attributes.isRegularFile()
+                || attributes.size() != requireTrip(lease.tripId).segments.get(Integer.parseInt(segmentId) - 1).byteSize)
+            throw new IOException("Completed segment changed");
+        return attributes;
+    }
+
+    private File checkedTransferSegment(ReadLease lease, String segmentId) throws IOException {
         if (lease == null || lease.catalog != this) throw new IllegalArgumentException("Active read lease required");
         String tripId = Long.toString(lease.tripId);
         File file = completedSegmentFile(tripId, segmentId);
         Segment segment = requireTrip(lease.tripId).segments.get(Integer.parseInt(segmentId) - 1);
         File expected = new File(new File(root, tripId), segment.fileName);
-        if (!expected.equals(file) || !Files.isRegularFile(expected.toPath(),
-                java.nio.file.LinkOption.NOFOLLOW_LINKS)) throw new IOException("Completed segment unavailable");
-        RandomAccessFile input = new RandomAccessFile(file, "r");
-        try {
-            if (input.length() != segment.byteSize) throw new IOException("Completed segment size mismatch");
-            return input;
-        } catch (IOException failure) {
-            input.close(); throw failure;
+        if (!expected.equals(file) || !Files.isRegularFile(expected.toPath(), LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Completed segment unavailable");
+        if (Files.size(expected.toPath()) != segment.byteSize) throw new IOException("Completed segment size mismatch");
+        return expected;
+    }
+
+    /** Lease acquisition cannot interleave between retention planning and deletion. */
+    public synchronized void enforceStorageReserve(LongSupplier freeBytes, long reserveBytes,
+            boolean automaticDeletion, Long activeTripId) throws IOException {
+        long available = freeBytes.getAsLong();
+        while (true) {
+            List<RetentionPlanner.Entry> entries = new ArrayList<>();
+            for (Trip trip : localSnapshot()) {
+                List<Long> sizes = new ArrayList<>();
+                for (Segment segment : trip.segments) sizes.add(segment.byteSize);
+                entries.add(new RetentionPlanner.Entry(trip.tripId, trip.startMs, sizes, trip.completed));
+            }
+            RetentionPlanner.Plan plan = RetentionPlanner.selectDeletions(entries, available, reserveBytes,
+                    automaticDeletion, activeTripId, leasedTripIds());
+            if (!plan.recordingMayContinue) throw new IOException("Reserva de armazenamento indisponível");
+            if (plan.tripIds.isEmpty()) return;
+            for (Long id : plan.tripIds) discardTrip(Long.toString(id));
+            // Deletion estimates alone never authorize recording; replan against actual free bytes.
+            available = freeBytes.getAsLong();
         }
     }
 

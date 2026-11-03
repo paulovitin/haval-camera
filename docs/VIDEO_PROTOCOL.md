@@ -212,7 +212,17 @@ Before connecting, Camera leases the completed trip and validates every selected
 catalog segment and its exact file size. Opening payload content additionally
 requires that catalog's active lease and refuses symlinks/path aliases. Active
 trips, `current.partial`, missing files, traversal and unselected IDs cannot be
-transferred. Payload reads use `RandomAccessFile.seek` at the authorized ACK.
+transferred. Payload reads use a read-only `FileChannel` opened with
+`NOFOLLOW_LINKS`; the final file component cannot be followed through a symlink
+swapped during open. The worker keeps that same handle through the segment's
+DATA/EOF ACK lifecycle, including pauses and retransmission, and seeks with
+`FileChannel.position` at the authorized ACK. It never applies a verified flag
+to a reopened path. A new attempt/segment opens and verifies its own handle.
+The current catalog path/type/size, file key, modification time and opened handle
+size are revalidated around each read. A changed identity or modification stamp,
+symlink, missing file or size mismatch terminates the attempt before further
+DATA/EOF. Hashing and reads still use the retained original handle, never a
+replacement path; that handle is closed before the lease is released.
 Before first DATA or resumed EOF for each segment, the worker verifies the whole
 file against completed catalog SHA-256 using the same read buffer. DATA hashes
 come from `TransferChunkCodec`; EOF contains completed size and whole-file digest.
@@ -236,3 +246,14 @@ Catalog index publications notify a listener; the service posts a
 `ContentResolver.notifyChange` for `content://br.com.redesurftank.havalcamera.video/trips`
 so completed-file changes and retention/deletion can trigger metadata refresh.
 Lease changes themselves do not publish catalog changes.
+
+
+Retention reserve enforcement is a catalog transaction: free-space sampling,
+selection from current trips/leases, deletion and any required replanning share
+the catalog lock used by lease acquisition. A lease already held excludes that
+trip and selection can use another eligible completed trip. A new lease cannot
+appear between selection and deletion. Active trips remain excluded and disabled
+automatic deletion remains authoritative. After deletion, the gate samples actual
+free bytes and replans; recording proceeds only when the actual reserve is met.
+Insufficient recoverable space still fails the recording reserve gate without
+deleting protected footage. A lease conflict alone never becomes a pipeline error.
